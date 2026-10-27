@@ -1,0 +1,7 @@
+/src-tauri/target/
+/src-tauri/gen/
+/Desktop Pet Clipboard.app/
+/.desktop-pet-build.*/
+__pycache__/
+*.py[cod]
+.DS_Store

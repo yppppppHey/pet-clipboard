@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Desktop Pet Clipboard",
+  "version": "0.1.0",
+  "identifier": "com.yuping.desktop-pet-clipboard",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "pet",
+        "title": "Pet",
+        "url": "pet.html",
+        "width": 168,
+        "height": 140,
+        "x": 1150,
+        "y": 620,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "focus": false,
+        "focusable": false,
+        "acceptFirstMouse": true,
+        "alwaysOnTop": false,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "panel",
+        "title": "宠物剪贴板",
+        "url": "panel.html",
+        "width": 380,
+        "height": 520,
+        "x": 200,
+        "y": 200,
+        "decorations": false,
+        "transparent": true,
+        "acceptFirstMouse": true,
+        "alwaysOnTop": false,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": false,
+        "visible": false,
+        "focus": false,
+        "visibleOnAllWorkspaces": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "app",
+    "icon": []
+  }
+}

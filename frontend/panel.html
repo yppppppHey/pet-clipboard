@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宠物剪贴板</title>
+<style>
+  :root {
+    --bg: #fff9fb; --card: #ffffff; --ink: #4a3f3a; --sub: #a3928b;
+    --accent: #ffb3c0; --accent-deep: #e87f95; --line: #f4e6ea;
+    --green: #7fc8a9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: transparent; width: 100%; height: 100%;
+    font: 13px/1.5 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: var(--ink); overflow: hidden;
+  }
+  .panel {
+    width: 100%; height: 100%;
+    background: rgba(255, 250, 252, .88);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 214, 224, .8);
+    box-shadow: 0 8px 28px rgba(180, 120, 140, .18);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  /* 标题栏：拖拽 + 关闭按钮 */
+  .titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px 8px;
+  }
+  .title-drag { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; align-self: stretch; }
+  .titlebar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-deep); }
+  .titlebar h1 { font-size: 13px; font-weight: 600; flex: 1; color: var(--ink); }
+  .close-btn {
+    -webkit-app-region: no-drag;
+    border: 1px solid var(--line); background: var(--card); color: var(--sub);
+    flex: 0 0 32px; width: 32px; height: 32px; border-radius: 8px; touch-action: manipulation;
+    display: grid; place-items: center; font-size: 20px; line-height: 1; cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .close-btn:hover { background: #ffe3ea; border-color: var(--accent-deep); color: var(--accent-deep); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 6px; padding: 0 12px; }
+  .tab {
+    border: none; background: transparent; font-family: inherit;
+    flex: 1; text-align: center; padding: 6px 0; border-radius: 9px;
+    color: var(--sub); cursor: pointer; font-size: 12px;
+    transition: all .15s;
+  }
+  .tab.active { background: #ffe3ea; color: var(--accent-deep); font-weight: 600; }
+
+  .toolbar { padding: 10px 12px 6px; display: none; }
+  .toolbar.show { display: block; }
+  .search {
+    width: 100%; padding: 7px 12px; font-size: 12.5px;
+    border: 1px solid var(--line); border-radius: 9px; outline: none;
+    background: var(--card); color: var(--ink);
+  }
+  .search:focus { border-color: var(--accent); }
+
+  /* 列表 */
+  .list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 10px; }
+  .list::-webkit-scrollbar { width: 5px; }
+  .list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; margin-bottom: 6px;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; cursor: pointer; position: relative;
+    transition: all .12s;
+  }
+  .row:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 3px 10px rgba(232,127,149,.10); }
+  .row .copy { flex: 1; min-width: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .row .k { display: block; font-weight: 550; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .badge { font-size: 10px; color: #fff; background: var(--green); padding: 1px 7px; border-radius: 6px; }
+  .row .del {
+    opacity: 0; border: none; background: none; color: #d8a2ae;
+    font-size: 14px; cursor: pointer; padding: 0 2px;
+  }
+  .row:hover .del, .row:focus-within .del { opacity: 1; }
+  button:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; }
+  button:disabled { cursor: wait; opacity: .65; }
+  .empty { text-align: center; color: var(--sub); padding: 36px 0; font-size: 12px; }
+
+  /* 添加表单 */
+  .add-form { padding: 8px 12px 12px; border-top: 1px dashed var(--line); display: flex; gap: 6px; }
+  .add-form input {
+    min-width: 0;
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px;
+    font-size: 12px; outline: none; color: var(--ink);
+  }
+  .add-form input:focus { border-color: var(--accent); }
+  #f-key { width: 96px; }
+  #f-value { flex: 1; }
+  .add-btn {
+    border: none; background: linear-gradient(135deg, #ffb3c0, #e87f95); color: #fff;
+    border-radius: 9px; padding: 7px 14px; font-size: 12px; cursor: pointer;
+  }
+  .add-btn:hover { filter: brightness(1.06); }
+
+  /* toast */
+  .toast {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(20px);
+    width: max-content; max-width: calc(100% - 24px); overflow-wrap: anywhere; text-align: center;
+    background: #4a3f3acc; color: #fff; font-size: 12px;
+    padding: 7px 16px; border-radius: 20px; opacity: 0;
+    transition: all .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .permission { margin: 6px 12px; padding: 7px 10px; border: 1px solid var(--accent); border-radius: 8px; background: #fff1f4; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+    .row:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+<div class="panel">
+  <div class="titlebar">
+    <div class="title-drag" data-tauri-drag-region>
+      <span class="dot" data-tauri-drag-region></span>
+      <h1 data-tauri-drag-region>宠物剪贴板</h1>
+    </div>
+    <button class="close-btn" id="closeBtn" type="button" data-tauri-drag-region="false" aria-label="关闭剪贴板" title="关闭剪贴板">&times;</button>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="剪贴板分类">
+    <button class="tab active" id="tab-perm" type="button" role="tab" aria-selected="true" aria-controls="list" data-tab="perm">永久存</button>
+    <button class="tab" id="tab-recent" type="button" role="tab" aria-selected="false" aria-controls="list" data-tab="recent">最近复制</button>
+  </div>
+
+  <button class="permission" id="permissionBtn" type="button" hidden>快捷键监听未启用，点击打开辅助功能设置</button>
+
+  <div class="toolbar show" id="searchBar">
+    <input class="search" id="search" type="search" aria-label="搜索永久存名称" placeholder="模糊搜索 key…" autocomplete="off">
+  </div>
+
+  <div class="list" id="list" role="tabpanel" aria-labelledby="tab-perm" aria-busy="false"></div>
+
+  <form class="add-form" id="addForm">
+    <input id="f-key" aria-label="名称" placeholder="key（名称）" maxlength="1024" autocomplete="off" required>
+    <input id="f-value" aria-label="内容" placeholder="内容" autocomplete="off">
+    <button class="add-btn" id="addBtn" type="submit">添加</button>
+  </form>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script src="panel.js" defer></script>
+</body>
+</html>

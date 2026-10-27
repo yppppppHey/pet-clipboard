@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>桌面宠物</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+  html, body { background: transparent; width: 100%; height: 100%; overflow: hidden; }
+  .pet-wrap {
+    width: 100%; height: 100%;
+    display: flex; align-items: flex-end; justify-content: center;
+    position: relative;
+  }
+  .pet {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    -webkit-user-drag: none;
+    cursor: grab;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,.18));
+  }
+  .pet:active { cursor: grabbing; }
+  .pet-btn {
+    position: absolute; right: 2px;
+    width: 26px; height: 26px; line-height: 24px; padding: 0;
+    text-align: center; border-radius: 50%;
+    background: #ffffffee; border: 1px solid #f0d9d0;
+    font-size: 13px; cursor: pointer; z-index: 10;
+    box-shadow: 0 2px 6px rgba(0,0,0,.15);
+    transition: transform .12s, background .12s;
+  }
+  .pet-btn:hover { transform: scale(1.12); }
+  .pet-btn:disabled { cursor: wait; opacity: .65; }
+  .toggle-btn { bottom: 2px; }
+  .pin-btn { top: 2px; display: grid; place-items: center; color: #9e847a; }
+  .pin-btn svg { width: 15px; height: 15px; transform: rotate(35deg); }
+  .pin-btn.pinned { background: #ffe3ea; border-color: #e87f95; color: #c75d77; }
+  .pin-btn.pinned svg { transform: none; }
+  .bubble {
+    position: absolute; top: 2px; right: 34px; max-width: calc(100% - 36px); z-index: 20;
+    background: #ffffffdd; color: #5b4a44;
+    font: 11px/1.4 -apple-system, "PingFang SC", sans-serif;
+    padding: 6px 10px; border-radius: 10px;
+    border: 1px solid #f0d9d0;
+    display: none; text-align: left; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  }
+  .bubble::after {
+    content: ""; position: absolute; bottom: -5px; right: 16px;
+    width: 8px; height: 8px; background: #ffffffdd;
+    border-right: 1px solid #f0d9d0; border-bottom: 1px solid #f0d9d0;
+    transform: rotate(45deg);
+  }
+  .bubble.show { display: block; }
+  .pet.bouncing { transform: translateY(-8px) scale(1.05); }
+  .pet { transition: transform .18s cubic-bezier(.3,1.6,.6,1); }
+  button:focus-visible { outline: 2px solid #e87f95; outline-offset: -2px; }
+  @media (prefers-reduced-motion: reduce) {
+    .pet, .pet-btn { transition: none; }
+    .pet.bouncing { transform: none; }
+  }
+</style>
+</head>
+<body>
+<div class="pet-wrap">
+  <button class="bubble" id="bubble" type="button" title="打开辅助功能设置">点击启用「辅助功能」，开启复制和粘贴监听</button>
+  <img class="pet" id="pet" src="assets/pet.png" alt="可拖动的桌面宠物" draggable="false">
+  <button class="pet-btn pin-btn" id="petPinBtn" type="button" aria-label="桌宠置顶" aria-pressed="false" title="正在读取置顶状态" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 3H8v6l-3 3v3h14v-3l-3-3V3ZM12 15v7"/></svg>
+  </button>
+  <button class="pet-btn toggle-btn" id="toggleBtn" type="button" aria-label="打开或收起剪贴板面板" title="打开/收起剪贴板面板">📋</button>
+</div>
+<script src="pet.js" defer></script>
+</body>
+</html>
