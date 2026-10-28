@@ -162,7 +162,7 @@ class NativeContractTests(unittest.TestCase):
         self.assertRegex(hotkey, r"const LISTEN_ONLY:\s*u32\s*=\s*1;")
         self.assertIn("LISTEN_ONLY,", hotkey)
 
-    def test_outside_click_dismissal_only_exempts_the_pet_in_every_screen_mode(self):
+    def test_unpinned_outside_click_dismissal_only_exempts_the_pet_in_every_screen_mode(self):
         main = (ROOT / "src-tauri/src/main.rs").read_text()
         dismiss = function_body(main, "dismiss_pet_on_outside_click")
         self.assertIn("PET_PINNED.load", dismiss)
@@ -193,6 +193,20 @@ class NativeContractTests(unittest.TestCase):
         self.assertLess(hide.index('b"orderOut:'), hide.index('b"isVisible'))
         self.assertIn("Err(", hide)
         self.assertNotRegex(hide, r"order_back|orderFront|setLevel")
+
+    def test_pinned_pet_returns_before_any_click_or_space_dismissal(self):
+        main = (ROOT / "src-tauri/src/main.rs").read_text()
+        dismiss = function_body(main, "dismiss_pet_on_outside_click")
+        self.assertRegex(dismiss, r"if PET_PINNED.load\(Ordering::SeqCst\)\s*\{\s*return;")
+        self.assertLess(dismiss.index("PET_PINNED.load"), dismiss.index("clicked_window == -1"))
+        self.assertLess(dismiss.index("PET_PINNED.load"), dismiss.index("macos_window::hide_pet"))
+        native = (ROOT / "src-tauri/src/macos_window.rs").read_text()
+        setter = function_body(native, "set_pet_pinned")
+        self.assertIn('b"level\\0"', setter)
+        self.assertIn("actual_level != pet_level(pinned)", setter)
+        self.assertLess(setter.index("actual_level !="), setter.index("if pinned"))
+        toggle = function_body(main, "toggle_pet_pin")
+        self.assertLess(toggle.index("set_pet_pinned(&win, pin)?"), toggle.index("PET_PINNED.store"))
 
     def test_click_hit_testing_uses_event_coordinates_and_visible_native_window_frames(self):
         native = (ROOT / "src-tauri/src/macos_window.rs").read_text()
@@ -234,7 +248,7 @@ class NativeContractTests(unittest.TestCase):
     def test_build_identity_is_visible_in_tray_menu(self):
         main = (ROOT / "src-tauri/src/main.rs").read_text()
         self.assertIn('"build-info"', main)
-        self.assertIn("1027-5", main)
+        self.assertIn("1028-1", main)
 
     def test_launching_inside_an_existing_fullscreen_hides_without_waiting_for_space_change(self):
         native = (ROOT / "src-tauri/src/macos_window.rs").read_text()

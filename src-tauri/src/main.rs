@@ -126,10 +126,12 @@ pub fn dismiss_pet_on_outside_click(
 ) {
     let app2 = app.clone();
     let _ = app.run_on_main_thread(move || {
-        // Space notifications are not clicks. Only they retain the full-screen/pin policy.
+        // A pinned pet stays visible across outside clicks and Space changes.
+        if PET_PINNED.load(Ordering::SeqCst) {
+            return;
+        }
         if clicked_window == -1
-            && (PET_PINNED.load(Ordering::SeqCst)
-                || !unsafe { macos_window::system_is_fullscreen() })
+            && !unsafe { macos_window::system_is_fullscreen() }
         {
             return;
         }
@@ -388,7 +390,7 @@ fn main() {
             let build_info = tauri::menu::MenuItem::with_id(
                 app,
                 "build-info",
-                "统一点击隐藏版 · 1027-5",
+                "置顶优先修复版 · 1028-1",
                 false,
                 None::<&str>,
             )?;

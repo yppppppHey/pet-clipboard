@@ -237,6 +237,12 @@ pub unsafe fn set_pet_pinned(window: *const c_void, pinned: bool) -> Result<(), 
         sel_registerName(b"setLevel:\0".as_ptr().cast()),
         pet_level(pinned),
     );
+    let read_level: unsafe extern "C" fn(*const c_void, *const c_void) -> isize =
+        std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+    let actual_level = read_level(window, sel_registerName(b"level\0".as_ptr().cast()));
+    if actual_level != pet_level(pinned) {
+        return Err(format!("桌宠窗口层级设置失败：期望 {}，实际 {}", pet_level(pinned), actual_level));
+    }
     if pinned {
         show_pet_passively(window, true, false)
     } else {
