@@ -4,26 +4,45 @@ mod hotkey;
 #[cfg(target_os = "macos")]
 mod macos_window;
 mod store;
+#[cfg(target_os = "windows")]
+mod virtual_desktop;
+#[cfg(target_os = "windows")]
+mod windows_window;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
 
 pub type AppStateSafe = Arc<Mutex<store::StoreManager>>;
 
 /// Pet pin state; keep the initial value aligned with the window configuration.
 static PET_PINNED: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 static PET_SCREEN_COVERED: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 static CONTEXT_CHECK_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Windows：把 Tauri 窗口句柄转成 Win32 HWND。
+#[cfg(target_os = "windows")]
+fn pet_hwnd(win: &tauri::WebviewWindow) -> Result<HWND, String> {
+    win.hwnd().map(|h| HWND(h.0)).map_err(|e| e.to_string())
+}
 
 fn configure_all_spaces(win: &tauri::WebviewWindow) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     unsafe {
         macos_window::configure_all_spaces(win.ns_window()?.cast());
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // 跨虚拟桌面固定失败时内部降级为单桌面，绝不阻断启动。
+        if let Ok(hwnd) = pet_hwnd(win) {
+            let _ = unsafe { windows_window::configure_all_spaces(hwnd) };
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = win;
     Ok(())
 }
@@ -39,7 +58,13 @@ fn show_pet_passively(win: &tauri::WebviewWindow, pinned: bool, reveal: bool) ->
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn show_pet_passively(win: &tauri::WebviewWindow, pinned: bool, reveal: bool) -> Result<(), String> {
+    let hwnd = pet_hwnd(win)?;
+    unsafe { windows_window::show_pet_passively(hwnd, pinned, reveal) }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn show_pet_passively(win: &tauri::WebviewWindow, _pinned: bool, _reveal: bool) -> Result<(), String> {
     win.show().map_err(|e| e.to_string())
 }
@@ -52,7 +77,13 @@ fn set_pet_pinned(win: &tauri::WebviewWindow, pinned: bool) -> Result<(), String
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn set_pet_pinned(win: &tauri::WebviewWindow, pinned: bool) -> Result<(), String> {
+    let hwnd = pet_hwnd(win)?;
+    unsafe { windows_window::set_pet_pinned(hwnd, pinned) }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn set_pet_pinned(win: &tauri::WebviewWindow, pinned: bool) -> Result<(), String> {
     win.set_always_on_top(pinned).map_err(|e| e.to_string())
 }
@@ -94,6 +125,8 @@ fn present_pet(app: &tauri::AppHandle, reveal: bool) -> Result<(), String> {
     let pinned = PET_PINNED.load(Ordering::SeqCst);
     #[cfg(target_os = "macos")]
     PET_SCREEN_COVERED.store(unsafe { macos_window::system_is_fullscreen() }, Ordering::SeqCst);
+    #[cfg(target_os = "windows")]
+    PET_SCREEN_COVERED.store(unsafe { windows_window::system_is_fullscreen() }, Ordering::SeqCst);
     show_pet_passively(&win, pinned, reveal)?;
     Ok(())
 }
@@ -162,6 +195,47 @@ pub fn dismiss_pet_on_outside_click(
     });
 }
 
+/// Windows：LL 钩子拿不到窗口 id（恒传 -1 哨兵）；带坐标即按命中判定，无坐标不隐藏。
+#[cfg(target_os = "windows")]
+pub fn dismiss_pet_on_outside_click(
+    app: &tauri::AppHandle,
+    _clicked_window: i64,
+    clicked_point: Option<hotkey::Point>,
+) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        // A pinned pet stays visible across outside clicks.
+        if PET_PINNED.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(point) = clicked_point else {
+            return;
+        };
+        let Some(win) = app2.get_webview_window("pet") else {
+            return;
+        };
+        let Ok(hwnd) = pet_hwnd(&win) else {
+            return;
+        };
+        let hit = unsafe {
+            windows_window::contains_click(
+                hwnd,
+                windows_window::Point {
+                    x: point.x as i32,
+                    y: point.y as i32,
+                },
+            )
+        };
+        if hit {
+            return;
+        }
+        match unsafe { windows_window::hide_pet(hwnd) } {
+            Ok(()) => eprintln!("[pet] dismissed: native visibility=false"),
+            Err(error) => eprintln!("[pet] dismissal failed: {error}"),
+        }
+    });
+}
+
 #[cfg(target_os = "macos")]
 fn observe_screen_context(app: tauri::AppHandle) {
     // Only entering full-screen changes presentation. Leaving it must not resurrect
@@ -181,6 +255,34 @@ fn observe_screen_context(app: tauri::AppHandle) {
                 }
             }
         }).is_err() {
+            CONTEXT_CHECK_PENDING.store(false, Ordering::SeqCst);
+            break;
+        }
+    });
+}
+
+/// Windows：与 mac 侧同语义——仅进入全屏时隐藏一次；离开全屏不复活被点击隐藏的桌宠。
+#[cfg(target_os = "windows")]
+fn observe_screen_context(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(750));
+        if CONTEXT_CHECK_PENDING.swap(true, Ordering::SeqCst) {
+            continue;
+        }
+        let handle = app.clone();
+        if app
+            .run_on_main_thread(move || {
+                CONTEXT_CHECK_PENDING.store(false, Ordering::SeqCst);
+                let covered = unsafe { windows_window::system_is_fullscreen() };
+                let previous = PET_SCREEN_COVERED.swap(covered, Ordering::SeqCst);
+                if covered && !previous && !PET_PINNED.load(Ordering::SeqCst) {
+                    if let Err(error) = present_pet(&handle, false) {
+                        eprintln!("[pet] context transition failed: {error}");
+                    }
+                }
+            })
+            .is_err()
+        {
             CONTEXT_CHECK_PENDING.store(false, Ordering::SeqCst);
             break;
         }
@@ -413,6 +515,16 @@ fn main() {
             #[cfg(target_os = "macos")]
             unsafe {
                 macos_window::observe_space_changes()?;
+                observe_screen_context(app.handle().clone());
+            }
+            #[cfg(target_os = "windows")]
+            {
+                // 共享调用点只配置了面板；Windows 需把桌宠也固定到所有虚拟桌面。
+                if let Some(pet) = app.get_webview_window("pet") {
+                    let _ = configure_all_spaces(&pet);
+                }
+                // 与 mac 平台接口对等：Windows 无 Space 变更事件，此调用为契约 no-op。
+                let _ = unsafe { windows_window::observe_space_changes() };
                 observe_screen_context(app.handle().clone());
             }
 

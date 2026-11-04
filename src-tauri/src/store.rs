@@ -37,6 +37,13 @@ pub struct StoreManager {
 
 impl StoreManager {
     pub fn load() -> Result<Self, String> {
+        // Windows 规范落在 %LOCALAPPDATA%；macOS 及其他平台沿用用户主目录。
+        #[cfg(target_os = "windows")]
+        let path = dirs::data_local_dir()
+            .ok_or("无法找到本地应用数据目录（%LOCALAPPDATA%）")?
+            .join("desktop-pet-clipboard")
+            .join("store.json");
+        #[cfg(not(target_os = "windows"))]
         let path = dirs::home_dir()
             .ok_or("无法找到用户目录")?
             .join(".desktop-pet-clipboard/store.json");

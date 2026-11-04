@@ -6,7 +6,7 @@ Tauri 2 桌面宠物，兼任你的第二剪贴板。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/Platform-macOS%2013%2B-lightgrey.svg)](#已知限制)
-[![Tests: 81](https://img.shields.io/badge/Tests-81%20passing-brightgreen.svg)](#自动化测试)
+[![Tests](https://img.shields.io/badge/Tests-macOS%2081%20·%20Windows%20CI-brightgreen.svg)](#自动化测试)
 
 ## 快速开始
 
@@ -22,9 +22,9 @@ cargo run --manifest-path src-tauri/Cargo.toml --locked
 
 ## 已知限制
 
-- 全局按键旁听仅实现于 macOS；Linux / Windows 尚未适配
+- 全局按键旁听已实现于 macOS（CGEventTap）与 Windows（低级钩子）；Linux 尚未适配
 - 无开发者签名的应用无法穿透原生全屏 Space 浮窗；全屏场景请使用菜单栏入口（置顶桌宠除外，见下文）
-- 剪贴板数据为明文本地存储（`~/.desktop-pet-clipboard/store.json`），请勿收集密码等敏感内容
+- 剪贴板数据为明文本地存储，路径按平台区分：macOS `~/.desktop-pet-clipboard/store.json`，Windows `%LOCALAPPDATA%\desktop-pet-clipboard\store.json`，请勿收集密码等敏感内容
 
 ## 功能
 
@@ -140,3 +140,42 @@ tests/             # 零额外依赖的前端逻辑与打包回归测试
 ```
 
 素材处理：原图 `assets/material.png`，经 AI 图像工具（Nano Banana Pro）高清重绘得到候选 `aigc_1.png`（采用）/ `aigc_2.png`（备选），再用 Pillow 去除白色背景生成透明素材 `pet.png`。原图与全部候选图均为项目自带文件，无外部服务依赖。
+
+## Windows 版
+
+同一份代码通过 `#[cfg]` 双平台编译：前端、存储与业务逻辑共享，平台差异隔离在以下模块。
+
+### 架构（单仓库双平台）
+
+| 共享 | macOS 插件 | Windows 插件 |
+| --- | --- | --- |
+| `frontend/`、`store.rs`、共享时序状态机（`hotkey.rs` 上半部）、`main.rs` 业务主体 | `macos_window.rs`（AppKit CGEventTap 旁听 + Space） | `windows_window.rs`（Win32 无激活显示/HWND）、`hotkey.rs` 内 `platform`（WH_KEYBOARD_LL / WH_MOUSE_LL 只旁听）、`virtual_desktop.rs`（非官方 COM 跨桌面固定，失败自动降级） |
+
+- 存储：Windows 落在 `%LOCALAPPDATA%\desktop-pet-clipboard\store.json`（`#[cfg]` 分支，macOS 路径不变）。
+- 权限：Windows 无「辅助功能」授权，以钩子健康状态代替；监听中断时气泡展示恢复文案（运行时按 UA 选择，Mac 静态文案原样保留）。
+- 打包：主 `tauri.conf.json` 保持 macOS `app` 目标不变；NSIS 配置隔离在 `tauri.windows.conf.json` 平台覆盖层。
+
+### Windows 构建与测试
+
+```powershell
+# 自动化测试（前端/契约层与平台无关，Rust 单测需 Windows）
+cargo test --manifest-path src-tauri/Cargo.toml
+node --test tests/frontend.test.cjs
+python -m unittest discover -s tests -p 'test_*_windows.py' -v
+
+# 一键打包：全量测试 -> cargo tauri build -> NSIS 安装包复制到 dist\（失败保留旧产物）
+powershell -ExecutionPolicy Bypass -File make_app.ps1
+```
+
+图标由 `gen_icons.py` 从 `frontend/assets/pet.png` 生成（需要 `pip install pillow`）。
+
+连续集成：`.github/workflows/windows.yml` 在真实 `windows-latest` 容器跑全部测试并产出 NSIS 安装包（artifact `windows-nsis-installer`）。
+
+### Windows 已知限制
+
+| 限制 | 说明 | 应对 |
+| --- | --- | --- |
+| UIPI 隔离 | 普通权限无法旁听"以管理员运行"程序中的 C/V | 默认不提权，不影响其正常使用 |
+| 虚拟桌面 | 使用非官方 ImmersiveShell COM，系统更新后可能失效 | 失败自动降级为单桌面，不阻断启动 |
+| LL 钩子超时 | 回调过慢会被系统摘除 | 回调只做无锁入队；消息泵退出后 2s 自动重装 |
+| 未签名安装包 | SmartScreen 可能提示"未知发布者" | 可选"仍要运行"；后续可补代码签名 |

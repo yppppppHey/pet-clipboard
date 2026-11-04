@@ -5,3 +5,8 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Windows 开发与打包
+Thumbs.db
+/dist/
+/cargo-check*.log
