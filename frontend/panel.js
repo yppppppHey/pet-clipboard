@@ -14,6 +14,11 @@ let toastTimer;
 let adding = false;
 let disposed = false;
 
+// Windows 没有「辅助功能」授权：监听中断时展示恢复文案（Mac 保留授权引导原文）。
+if (typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)) {
+  $('permissionBtn').textContent = '全局复制/粘贴监听已中断，正在自动恢复，点击重试';
+}
+
 function toast(message) {
   toastEl.textContent = String(message);
   toastEl.classList.add('show');

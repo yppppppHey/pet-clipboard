@@ -1,6 +1,6 @@
 //! Listen-only global shortcuts. The event tap never performs clipboard or disk I/O.
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -8,20 +8,20 @@ pub struct Point {
     pub y: f64,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Debug, Clone, Copy)]
 enum PresentationEvent {
     Paste,
     Click(i64, Option<Point>),
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Default)]
 struct PresentationState {
     deadline: Option<std::time::Instant>,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 impl PresentationState {
     fn receive(
         &mut self,
@@ -405,7 +405,356 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows 平台事件源：WH_KEYBOARD_LL / WH_MOUSE_LL 低级钩子只旁听（回调只入队、
+/// 立即 CallNextHookEx 放行）；时序状态机复用共享层 PresentationState/PresentationEvent。
+#[cfg(target_os = "windows")]
+mod platform {
+    use super::{Point, PresentationEvent, PresentationState};
+    use crate::AppStateSafe;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+    use tauri::Emitter;
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
+        UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+        WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
+        WM_SYSKEYDOWN, WM_SYSKEYUP,
+    };
+
+    const COPY_DELAY: Duration = Duration::from_millis(250);
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
+
+    /// 钩子健康状态：安装失败或消息泵异常退出时转 false（前端据此展示恢复提示）。
+    static HOOK_HEALTHY: AtomicBool = AtomicBool::new(true);
+
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    enum KbdAction {
+        Copy,
+        Paste,
+    }
+
+    /// VK 状态机：修饰键跟踪 + 长按抑制；复制首次 KEYDOWN、粘贴 KEYUP（对齐共享层时序语义）。
+    #[derive(Default)]
+    struct Keys {
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+        c_down: bool,
+        v_down: bool,
+        paste_pending: bool,
+    }
+
+    impl Keys {
+        fn event(&mut self, vk: u32, down: bool) -> Option<KbdAction> {
+            match vk {
+                0x11 | 0xA2 | 0xA3 => {
+                    self.ctrl = down;
+                    return None;
+                }
+                0x10 | 0xA0 | 0xA1 => {
+                    self.shift = down;
+                    return None;
+                }
+                0x12 | 0xA4 | 0xA5 => {
+                    self.alt = down;
+                    return None;
+                }
+                _ => {}
+            }
+            match vk {
+                0x43 => {
+                    // VK_C
+                    if down {
+                        if !self.c_down {
+                            self.c_down = true;
+                            if self.ctrl && !self.shift && !self.alt {
+                                return Some(KbdAction::Copy);
+                            }
+                        }
+                    } else {
+                        self.c_down = false;
+                    }
+                }
+                0x56 => {
+                    // VK_V
+                    if down {
+                        if !self.v_down {
+                            self.v_down = true;
+                            if self.ctrl && !self.shift && !self.alt {
+                                self.paste_pending = true;
+                            }
+                        }
+                    } else {
+                        self.v_down = false;
+                        if self.paste_pending {
+                            self.paste_pending = false;
+                            return Some(KbdAction::Paste);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            None
+        }
+    }
+
+    thread_local! {
+        /// LL 钩子回调只在安装线程的消息泵上分发；状态机绑定该线程以抑制长按重复。
+        static KEY_STATE: std::cell::RefCell<Keys> = std::cell::RefCell::new(Keys::default());
+    }
+
+    struct Context {
+        copy_tx: SyncSender<()>,
+        paste_tx: SyncSender<PresentationEvent>,
+    }
+
+    static CONTEXT: OnceLock<Context> = OnceLock::new();
+
+    unsafe extern "system" fn keyboard_proc(
+        code: i32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if code >= 0 {
+            let down = matches!(wparam.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
+            let up = matches!(wparam.0 as u32, WM_KEYUP | WM_SYSKEYUP);
+            if down || up {
+                let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+                let action =
+                    KEY_STATE.with(|cell| cell.borrow_mut().event(info.vkCode as u32, down));
+                if let Some(context) = CONTEXT.get() {
+                    match action {
+                        Some(KbdAction::Copy) => {
+                            let _ = context.copy_tx.try_send(());
+                        }
+                        Some(KbdAction::Paste) => {
+                            let _ = context.paste_tx.try_send(PresentationEvent::Paste);
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+        // 只旁听：始终放行，不吞键。
+        CallNextHookEx(None, code, wparam, lparam)
+    }
+
+    unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            let id = wparam.0 as u32;
+            if matches!(id, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) {
+                let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
+                if let Some(context) = CONTEXT.get() {
+                    // LL 钩子拿不到窗口 id，用 -1 哨兵；屏幕坐标走共享 Point。
+                    let _ = context.paste_tx.try_send(PresentationEvent::Click(
+                        -1,
+                        Some(Point {
+                            x: info.pt.x as f64,
+                            y: info.pt.y as f64,
+                        }),
+                    ));
+                }
+            }
+        }
+        CallNextHookEx(None, code, wparam, lparam)
+    }
+
+    fn capture_clipboard(app: &tauri::AppHandle, state: &AppStateSafe) -> Result<bool, String> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        app.run_on_main_thread(move || {
+            let text = arboard::Clipboard::new()
+                .and_then(|mut clipboard| clipboard.get_text())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(text);
+        })
+        .map_err(|e| e.to_string())?;
+        // 剪贴板读取保持在主线程；锁定与持久化留在此 worker。
+        let Ok(Ok(text)) = rx.recv_timeout(Duration::from_secs(2)) else {
+            return Ok(false);
+        };
+        state
+            .lock()
+            .map_err(|_| "剪贴板存储暂不可用".to_string())?
+            .push_recent(&text)
+    }
+
+    fn copy_worker(app: tauri::AppHandle, state: AppStateSafe, rx: Receiver<()>) {
+        while rx.recv().is_ok() {
+            loop {
+                match rx.recv_timeout(COPY_DELAY) {
+                    Ok(()) => continue,
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+            match capture_clipboard(&app, &state) {
+                Ok(true) => {
+                    let _ = app.emit("clipboard-added", ());
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    eprintln!("[clipboard] {error}");
+                    let _ = app.emit("clipboard-error", error);
+                }
+            }
+        }
+    }
+
+    fn paste_worker(app: tauri::AppHandle, rx: Receiver<PresentationEvent>) {
+        let mut state = PresentationState::default();
+        loop {
+            let event = match state.deadline {
+                Some(deadline) => {
+                    rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                }
+                None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            match event {
+                Ok(event) => {
+                    if let Some((window, point)) = state.receive(event, Instant::now()) {
+                        crate::dismiss_pet_on_outside_click(&app, window, point);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if state.take_due(Instant::now()) {
+                        // 原始粘贴先到达目标，然后桌宠一次性呈现。
+                        crate::bring_pet_forward(&app);
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    }
+
+    fn set_healthy(healthy: bool, app: &tauri::AppHandle) {
+        let previous = HOOK_HEALTHY.swap(healthy, Ordering::SeqCst);
+        if previous == healthy {
+            return;
+        }
+        if healthy {
+            let _ = app.emit("permission-granted", ());
+        } else {
+            // 失败驱动：仅在真正失败时才提示。
+            let _ = app.emit("no-permission", ());
+        }
+    }
+
+    /// Windows 无「辅助功能」授权：以钩子健康状态代替权限语义。
+    pub fn has_accessibility_permission() -> bool {
+        HOOK_HEALTHY.load(Ordering::SeqCst)
+    }
+
+    /// Windows 无授权设置页；真正的恢复由监听线程在消息泵退出后自动重装完成，
+    /// 这里仅把健康状态如实反馈给前端，避免用户误以为打开了某个设置页。
+    pub fn open_accessibility_settings() -> Result<(), String> {
+        if HOOK_HEALTHY.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err("监听仍在恢复中，请稍后再试".into())
+        }
+    }
+
+    pub fn spawn_listener(app: tauri::AppHandle, state: AppStateSafe) {
+        let (copy_tx, copy_rx) = mpsc::sync_channel(1);
+        let (paste_tx, paste_rx) = mpsc::sync_channel(64);
+        if CONTEXT.set(Context { copy_tx, paste_tx }).is_err() {
+            return;
+        }
+        let worker_app = app.clone();
+        std::thread::spawn(move || copy_worker(worker_app, state, copy_rx));
+        let worker_app = app.clone();
+        std::thread::spawn(move || paste_worker(worker_app, paste_rx));
+
+        std::thread::spawn(move || loop {
+            let keyboard_hook: windows::core::Result<HHOOK> =
+                unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) };
+            let mouse_hook: windows::core::Result<HHOOK> =
+                unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0) };
+            let (kb, mb) = match (keyboard_hook, mouse_hook) {
+                (Ok(kb), Ok(mb)) => (kb, mb),
+                (Err(e), _) | (_, Err(e)) => {
+                    eprintln!("[hotkey] 钩子安装失败：{e}");
+                    set_healthy(false, &app);
+                    std::thread::sleep(RETRY_DELAY);
+                    continue;
+                }
+            };
+            set_healthy(true, &app);
+            let mut msg = MSG::default();
+            // 消息泵：低级钩子回调在此线程分发；GetMessageW 阻塞即健康。
+            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.into() {
+                unsafe {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            // 消息泵异常退出：卸载钩子并按节拍重装。
+            set_healthy(false, &app);
+            unsafe {
+                let _ = UnhookWindowsHookEx(kb);
+                let _ = UnhookWindowsHookEx(mb);
+            }
+            std::thread::sleep(RETRY_DELAY);
+        });
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn copy_fires_once_on_first_keydown_and_repeats_ignored() {
+            let mut keys = Keys::default();
+            keys.event(0xA2, true); // left ctrl
+            assert_eq!(keys.event(0x43, true), Some(KbdAction::Copy));
+            assert_eq!(keys.event(0x43, true), None); // autorepeat
+            assert_eq!(keys.event(0x43, false), None);
+        }
+
+        #[test]
+        fn paste_fires_on_keyup_only() {
+            let mut keys = Keys::default();
+            keys.event(0x11, true); // ctrl
+            assert_eq!(keys.event(0x56, true), None);
+            assert_eq!(keys.event(0x56, false), Some(KbdAction::Paste));
+            assert_eq!(keys.event(0x56, false), None);
+        }
+
+        #[test]
+        fn modifiers_block_shortcuts() {
+            let mut keys = Keys::default();
+            keys.event(0x11, true);
+            keys.event(0x10, true); // shift
+            assert_eq!(keys.event(0x43, true), None);
+            let mut other = Keys::default();
+            other.event(0x11, true);
+            other.event(0x12, true); // alt
+            assert_eq!(other.event(0x56, true), None);
+            assert_eq!(other.event(0x56, false), None);
+        }
+
+        #[test]
+        fn plain_keys_do_nothing() {
+            let mut keys = Keys::default();
+            assert_eq!(keys.event(0x43, true), None);
+            assert_eq!(keys.event(0x56, false), None);
+        }
+
+        #[test]
+        fn paste_release_still_recognized_after_modifier_release() {
+            let mut keys = Keys::default();
+            keys.event(0x11, true);
+            keys.event(0x56, true);
+            keys.event(0x11, false);
+            assert_eq!(keys.event(0x56, false), Some(KbdAction::Paste));
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod platform {
     pub fn has_accessibility_permission() -> bool {
         false
