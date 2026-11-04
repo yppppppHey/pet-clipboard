@@ -7,7 +7,8 @@
   流程与系分 §11.2 对齐：
   1. 先运行全量自动化测试（cargo test / node --test / python 契约与打包回归），
      任一失败立即中止，不进入构建；
-  2. `cargo tauri build` 产出 NSIS 安装包（--debug 走 Debug 分支）；
+  2. `tauri build` 产出 NSIS 安装包（--debug 走 Debug 分支；本机没有 cargo-tauri
+     时自动回退到 `npx @tauri-apps/cli@2`，两者产物路径一致）；
   3. 构建成功且确认产物存在后，才复制到 dist 目录。
   dist 目录永不提前清空：任何失败路径都保留上一次的旧产物。
 
@@ -64,16 +65,21 @@ else {
     Write-Host '==> 已跳过自动化测试（-SkipTests）'
 }
 
-Write-Host "==> 阶段 2/2：cargo tauri build（$Mode）"
+Write-Host "==> 阶段 2/2：tauri build（$Mode）"
+$tauriArgs = if ($Mode -eq 'Debug') { @('build', '--debug') } else { @('build') }
 Push-Location $repo
 try {
-    if ($Mode -eq 'Debug') {
-        cargo tauri build --debug
+    # 优先用本机 cargo 子命令；没有 cargo-tauri 时回退到 npm 分发的同一版本 CLI，
+    # 两者产物路径一致（src-tauri\target\<profile>\bundle\nsis）。
+    cargo tauri --version *> $null
+    if ($LASTEXITCODE -eq 0) {
+        cargo tauri @tauriArgs
     }
     else {
-        cargo tauri build
+        Write-Host '    （未安装 cargo-tauri，回退到 npx @tauri-apps/cli）'
+        npx --yes @tauri-apps/cli@2 @tauriArgs
     }
-    Assert-LastExitCode "cargo tauri build（$Mode）"
+    Assert-LastExitCode "tauri build（$Mode）"
 }
 finally {
     Pop-Location

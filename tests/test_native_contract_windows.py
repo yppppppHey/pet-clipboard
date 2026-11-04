@@ -182,6 +182,30 @@ class WindowsWindowContract(unittest.TestCase):
         self.assertIn("pinned || reveal", body)
         self.assertIn("system_is_fullscreen", body)
 
+    def test_reveal_raises_topmost_regardless_of_fullscreen_detection(self):
+        """唤起即临时置顶：只在检测到全屏时置顶会漏判，漏判就被全屏应用整块盖住。"""
+        body = fn_body_at(self.src, 0, "show_pet_passively")
+        self.assertGreaterEqual(
+            body.count("raise_above_fullscreen"), 2, "显示前后各压一次 TOPMOST"
+        )
+        self.assertIn("TEMPORARY_TOPMOST", body)
+        self.assertIsNone(
+            re.search(r"reveal\s*&&\s*system_is_fullscreen\(\)", body),
+            "临时置顶不得再绑定在全屏检测上",
+        )
+
+    def test_hide_and_unpin_clear_temporary_topmost(self):
+        self.assertIn("TEMPORARY_TOPMOST", fn_body_at(self.src, 0, "hide_pet"))
+        unpin = fn_body_at(self.src, 0, "set_pet_pinned")
+        self.assertIn("TEMPORARY_TOPMOST", unpin)
+        self.assertNotIn("show_pet_passively(hwnd, false, true)", unpin,
+                         "取消置顶不能被唤起路径再压回最前")
+
+    def test_coverage_detects_topmost_foreground(self):
+        body = fn_body_at(self.src, 0, "foreground_is_topmost")
+        self.assertIn("GWL_EXSTYLE", body)
+        self.assertIn("WS_EX_TOPMOST", body)
+
     def test_space_observer_is_noop_on_windows(self):
         self.assertIn("Ok(())", fn_body_at(self.src, 0, "observe_space_changes"))
 
@@ -325,6 +349,17 @@ class MainContract(unittest.TestCase):
         self.assertIn("from_millis(750)", body)
         self.assertIn("windows_window::system_is_fullscreen()", body)
         self.assertIn("covered && !previous", body)
+
+    def test_screen_context_reasserts_temporary_topmost(self):
+        body = windows_body(self.main, "observe_screen_context")
+        self.assertIn("reassert_temporary_topmost", body)
+
+    def test_only_auto_hidden_pet_returns_after_cover(self):
+        """被全屏/最大化挡住自动收起的桌宠才恢复；用户点掉的保持隐藏。"""
+        observer = windows_body(self.main, "observe_screen_context")
+        self.assertIn("PET_HIDDEN_BY_COVER.swap(false", observer)
+        dismiss = windows_body(self.main, "dismiss_pet_on_outside_click")
+        self.assertIn("PET_HIDDEN_BY_COVER.store(false", dismiss)
 
     def test_passive_show_and_fullscreen_store_use_windows_native(self):
         show = windows_body(self.main, "show_pet_passively")

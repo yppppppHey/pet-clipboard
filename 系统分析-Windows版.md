@@ -153,6 +153,9 @@ fn observe_space_changes() -> Result<(), String>;
 - **被动显示**：`ShowWindow(hwnd, SW_SHOWNOACTIVATE)`；桌宠 `focusable:false` 已带 `WS_EX_NOACTIVATE`，确保不抢键盘焦点。
 - **隐藏**：`ShowWindow(hwnd, SW_HIDE)`，随后 `IsWindowVisible(hwnd)` 必须为 false，否则返回错误（与 Mac `orderOut + isVisible` 同语义）。
 - **置顶**：`SetWindowPos(HWND_TOPMOST/HWND_NOTOPMOST, 0,0,0,0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)`。
+- **临时置顶（v0.1.1）**：粘贴/快捷键唤起时**一律**先压一次 TOPMOST，不再以全屏检测为前提；`ShowWindow(SW_SHOWNOACTIVATE)` 之后再压一次，抵消显示引起的 Z 序重排。静态原子量 `TEMPORARY_TOPMOST` 与固定置顶互斥，隐藏、打开面板、取消固定时撤销。
+- **重申与恢复**：观察线程每轮调用 `reassert_temporary_topmost`（仅在可见且临时置顶时执行），防止全屏/置顶应用把自己抢回最前。
+- **前台置顶识别**：`GetWindowLongW(fg, GWL_EXSTYLE) & WS_EX_TOPMOST`，用于面板显示时判断前台是否本身就带置顶（全屏播放器、部分游戏），这类窗口靠普通层级永远盖不住。
 - **命中**：先 `IsWindowVisible`，再 `GetWindowRect` 取 `RECT`，`PtInRect(rect, point)`（左/上含、右/下不含，与 Mac contains 一致）。
 - **窗口标识**：`HWND.0 as isize`。
 - **全屏/铺满检测**（不截屏、不读标题，保持隐私口径）：
@@ -201,7 +204,8 @@ fn observe_space_changes() -> Result<(), String>;
 V 键松开
   → WH_KEYBOARD_LL 回调入队 Paste
   → paste_worker：等待 120ms（让原 App 先收到粘贴）
-  → 期间无点击 → bring_pet_forward：present_pet（多屏定位 + 被动显示）+ emit "v-pressed"（桌宠跳动）
+  → 期间无点击 → bring_pet_forward：present_pet（多屏定位 + 被动显示 + 临时置顶）+ emit "v-pressed"（桌宠跳动）
+  → 临时置顶不依赖全屏检测：显示前压一次 TOPMOST，显示后再压一次
   → 期间有点击 → 取消待展示，不弹出
 ```
 
@@ -216,15 +220,17 @@ V 键松开
 ### 7.4 置顶切换
 ```
 点击图钉 → toggle_pet_pin
-  → 先 SetWindowPos(TOPMOST/NOTOPMOST, SWP_NOACTIVATE) 成功
+  → 先清掉 TEMPORARY_TOPMOST（固定置顶接管层级，避免取消固定又被临时置顶压回最前）
+  → SetWindowPos(TOPMOST/NOTOPMOST, SWP_NOACTIVATE) 成功
   → 再更新 PET_PINNED 原子量 → 返回新状态，前端切换粉色样式
+  → 取消置顶走 show_no_activate（保持可见），不再复用 reveal 路径
 ```
 
 ---
 
 ## 8. 数据模型与存储
 
-- 路径：`C:\Users\<用户>\.desktop-pet-clipboard\store.json`（与 Mac 同构，`dirs::home_dir()` 定位；是否改用 `%APPDATA%` 见 §10）。
+- 路径：`%LOCALAPPDATA%\desktop-pet-clipboard\store.json`（`app_data_dir()` 定位；与 Mac 的 `~/.desktop-pet-clipboard` 同构，仅根目录不同）。
 - 格式（与 Mac 完全兼容，`#[serde(default)]` 容忍旧结构缺字段）：
 ```json
 {
@@ -249,6 +255,7 @@ V 键松开
 | **crates.io 网络** | 国内拉取依赖可能慢/失败 | 配置 cargo 国内镜像（如 rsproxy/USTC），仅改 `~/.cargo/config.toml` |
 | **Windows 图标格式** | 打包需 `.ico`，仓库仅有 PNG | 用 Tauri CLI 由源 PNG 生成全套 Windows 图标 |
 | **窗口焦点/全屏实测** | 单测无法替代真实桌面行为（与 Mac 同样 caveat） | 保留自动化契约测试 + 真实桌面手工验收清单 |
+| **独占全屏（DirectX）** | 独占全屏由系统合成器接管，任何 TOPMOST 窗口都无法覆盖 | 无边框全屏 / F11 / 最大化已支持；在文档与验收清单中明确标注为系统限制 |
 
 ---
 

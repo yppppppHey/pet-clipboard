@@ -23,6 +23,13 @@ static PET_PINNED: AtomicBool = AtomicBool::new(false);
 static PET_SCREEN_COVERED: AtomicBool = AtomicBool::new(false);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 static CONTEXT_CHECK_PENDING: AtomicBool = AtomicBool::new(false);
+/// Windows：桌宠是因为「前台铺满屏幕」被自动收起（而不是用户点击收起）。
+/// 只有这种收起才允许在离开全屏/最大化后自动恢复。
+#[cfg(target_os = "windows")]
+static PET_HIDDEN_BY_COVER: AtomicBool = AtomicBool::new(false);
+/// Windows：面板是否因前台全屏而临时置顶（隐藏面板时据此恢复层级）。
+#[cfg(target_os = "windows")]
+static PANEL_TEMP_TOPMOST: AtomicBool = AtomicBool::new(false);
 
 /// Windows：把 Tauri 窗口句柄转成 Win32 HWND。
 #[cfg(target_os = "windows")]
@@ -128,6 +135,16 @@ fn present_pet(app: &tauri::AppHandle, reveal: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     PET_SCREEN_COVERED.store(unsafe { windows_window::system_is_fullscreen() }, Ordering::SeqCst);
     show_pet_passively(&win, pinned, reveal)?;
+    #[cfg(target_os = "windows")]
+    {
+        // 记住这次隐藏的性质：被全屏/最大化挡住自动收起才有资格事后自动恢复，
+        // 用户主动点掉的桌宠必须保持隐藏。
+        match win.is_visible() {
+            Ok(true) => PET_HIDDEN_BY_COVER.store(false, Ordering::SeqCst),
+            Ok(false) if !pinned && !reveal => PET_HIDDEN_BY_COVER.store(true, Ordering::SeqCst),
+            _ => {}
+        }
+    }
     Ok(())
 }
 
@@ -230,7 +247,11 @@ pub fn dismiss_pet_on_outside_click(
             return;
         }
         match unsafe { windows_window::hide_pet(hwnd) } {
-            Ok(()) => eprintln!("[pet] dismissed: native visibility=false"),
+            Ok(()) => {
+                // 用户点击收起：不允许离开全屏后自动复活。
+                PET_HIDDEN_BY_COVER.store(false, Ordering::SeqCst);
+                eprintln!("[pet] dismissed: native visibility=false")
+            }
             Err(error) => eprintln!("[pet] dismissal failed: {error}"),
         }
     });
@@ -280,6 +301,28 @@ fn observe_screen_context(app: tauri::AppHandle) {
                         eprintln!("[pet] context transition failed: {error}");
                     }
                 }
+                if !covered && previous && !PET_PINNED.load(Ordering::SeqCst) {
+                    // 离开全屏：撤掉全屏唤起时加的临时置顶，恢复普通层级。
+                    if let Some(pet) = handle.get_webview_window("pet") {
+                        if let Ok(hwnd) = pet_hwnd(&pet) {
+                            let _ = unsafe { windows_window::clear_temporary_topmost(hwnd) };
+                        }
+                    }
+                    restore_temporary_topmost(&handle);
+                    // 之前只是被全屏/最大化挡住而自动收起 → 离开后自动恢复；
+                    // 用户点击收起的桌宠不复活。
+                    if PET_HIDDEN_BY_COVER.swap(false, Ordering::SeqCst) {
+                        if let Err(error) = present_pet(&handle, false) {
+                            eprintln!("[pet] restore after cover failed: {error}");
+                        }
+                    }
+                }
+                // 全屏/置顶应用会反复把自身拉回最前：唤起后的每一轮都重申一次临时置顶。
+                if let Some(pet) = handle.get_webview_window("pet") {
+                    if let Ok(hwnd) = pet_hwnd(&pet) {
+                        unsafe { windows_window::reassert_temporary_topmost(hwnd) };
+                    }
+                }
             })
             .is_err()
         {
@@ -289,6 +332,18 @@ fn observe_screen_context(app: tauri::AppHandle) {
     });
 }
 
+/// Windows：离开全屏时撤掉临时置顶，把面板/桌宠恢复到普通层级。
+#[cfg(target_os = "windows")]
+fn restore_temporary_topmost(app: &tauri::AppHandle) {
+    if PANEL_TEMP_TOPMOST.swap(false, Ordering::SeqCst) {
+        if let Some(panel) = app.get_webview_window("panel") {
+            if let Ok(hwnd) = pet_hwnd(&panel) {
+                let _ = unsafe { windows_window::clear_temporary_topmost(hwnd) };
+            }
+        }
+    }
+}
+
 fn show_panel(app: &tauri::AppHandle) -> Result<(), String> {
     let win = app
         .get_webview_window("panel")
@@ -296,6 +351,24 @@ fn show_panel(app: &tauri::AppHandle) -> Result<(), String> {
     if !win.is_visible().map_err(|e| e.to_string())? {
         if let Some(monitor) = active_monitor(app) {
             place_bottom_right(&win, &monitor, 380.0, 520.0);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // 前台应用全屏（或自身被置顶）时面板也要出现在其上，否则会被整块盖住。
+        if windows_window::system_is_fullscreen() || windows_window::foreground_is_topmost() {
+            if let Ok(hwnd) = pet_hwnd(&win) {
+                let _ = windows_window::raise_above_fullscreen(hwnd);
+                PANEL_TEMP_TOPMOST.store(true, Ordering::SeqCst);
+            }
+        }
+        // 面板要压在桌宠之上：撤掉桌宠唤起时的临时置顶（固定置顶不动）。
+        if !PET_PINNED.load(Ordering::SeqCst) {
+            if let Some(pet_win) = app.get_webview_window("pet") {
+                if let Ok(hwnd) = pet_hwnd(&pet_win) {
+                    let _ = windows_window::clear_temporary_topmost(hwnd);
+                }
+            }
         }
     }
     win.show().map_err(|e| e.to_string())?;
@@ -430,7 +503,10 @@ async fn toggle_panel(app: tauri::AppHandle) -> Result<(), String> {
             .get_webview_window("panel")
             .ok_or("面板窗口不可用")?;
         if win.is_visible().map_err(|e| e.to_string())? {
-            win.hide().map_err(|e| e.to_string())
+            win.hide().map_err(|e| e.to_string())?;
+            #[cfg(target_os = "windows")]
+            restore_temporary_topmost(app);
+            Ok(())
         } else {
             show_panel(app)
         }
@@ -444,7 +520,10 @@ async fn close_panel(app: tauri::AppHandle) -> Result<(), String> {
         app.get_webview_window("panel")
             .ok_or("面板窗口不可用")?
             .hide()
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        #[cfg(target_os = "windows")]
+        restore_temporary_topmost(app);
+        Ok(())
     })
     .await
 }
@@ -492,7 +571,7 @@ fn main() {
             let build_info = tauri::menu::MenuItem::with_id(
                 app,
                 "build-info",
-                "置顶优先修复版 · 1028-1",
+                "v0.1.1 · 全屏置顶修复 · 1028-1",
                 false,
                 None::<&str>,
             )?;

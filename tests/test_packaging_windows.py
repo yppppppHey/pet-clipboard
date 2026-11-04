@@ -4,7 +4,7 @@
 - 参数校验（ValidateSet）与 release/debug 分支；
 - 构建前全量测试（可 -SkipTests 跳过）；
 - 构建失败保留 dist 旧产物（脚本永不提前删除 dist；
-  复制产物只发生在 cargo tauri build 成功且产物存在之后）。
+  复制产物只发生在 tauri build 成功且产物存在之后）。
 
 在任何平台都可通过 `python -m unittest tests.test_packaging_windows` 运行。
 """
@@ -51,34 +51,40 @@ class MakeAppScriptContract(unittest.TestCase):
     def test_release_and_debug_build_branches(self):
         self.assertRegex(
             self.src,
-            r"if \(\$Mode -eq 'Debug'\)\s*\{\s*\r?\n\s*cargo tauri build --debug",
+            r"\$tauriArgs = if \(\$Mode -eq 'Debug'\) \{ @\('build', '--debug'\) \} else \{ @\('build'\) \}",
             "Debug 分支必须携带 --debug",
         )
-        release_branch = re.search(
-            r"else\s*\{\s*\r?\n\s*cargo tauri build(\s|\r?\n)", self.src
+        self.assertIn("cargo tauri @tauriArgs", self.src, "优先使用 cargo 子命令")
+        self.assertIn(
+            "npx --yes @tauri-apps/cli@2 @tauriArgs",
+            self.src,
+            "本机没有 cargo-tauri 时必须回退到 npm 分发的 CLI",
         )
-        self.assertIsNotNone(release_branch, "Release 分支执行 cargo tauri build")
 
     def test_dist_never_wiped(self):
         self.assertNotIn("Remove-Item", self.script_path.read_text(encoding="utf-8-sig"))
         self.assertNotIn("Remove-Item", self.src)
 
     def test_artifacts_copied_only_after_successful_build(self):
-        build_pos = self.src.index("cargo tauri build")
+        build_pos = self.src.index("cargo tauri @tauriArgs")
         copy_pos = self.src.index("Copy-Item")
         self.assertLess(build_pos, copy_pos, "产物复制必须发生在构建之后")
         # 产物确认失败同样不得触碰 dist
         self.assertIn("没有找到 NSIS 产物", self.src)
 
     def test_failure_paths_keep_dist_intact(self):
+        self.assertIn("dist 未做任何改动", self.src)
         for marker in (
-            "cargo test",
-            "node --test",
-            "python -m unittest",
-            "cargo tauri build",
+            "cargo test --manifest-path src-tauri/Cargo.toml",
+            "node --test tests/frontend.test.cjs",
+            "python -m unittest discover -s tests",
+            "tauri build（$Mode）",
         ):
-            gated = re.search(re.escape(marker) + r"[\s\S]{0,4000}?dist 未做任何改动", self.src)
-            self.assertIsNotNone(gated, f"{marker} 的失败路径必须声明 dist 未做任何改动")
+            idx = self.src.index(marker)
+            window = self.src[max(0, idx - 200) : idx + 200]
+            self.assertIn(
+                "Assert-LastExitCode", window, f"{marker} 必须紧跟失败断言"
+            )
 
     def test_installer_lookup_uses_nsis_bundle_dir(self):
         self.assertRegex(self.src, r"Join-Path \$profile 'bundle\\nsis'")
