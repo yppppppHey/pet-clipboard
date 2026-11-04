@@ -1,0 +1,71 @@
+src-tauri/src/main.rs
+  s_37df473f045b54::t_609afec182d42c 27-32,38-45
+  s_37df473f045b54::t_0f5fb5976cd526 264-291
+  s_37df473f045b54::t_a04870392bd87a 7-10,15-16,22,24
+  s_37df473f045b54::t_737ab225727aa6 520-525,528-529
+  s_37df473f045b54::t_a64d7c91da6fa8 526-527
+  s_37df473f045b54::t_bed4754cbd0918 80-86
+  s_37df473f045b54::t_bff0690fcad8fc 198-238
+  s_37df473f045b54::t_ad5fc0e4000f56 128-129
+  s_37df473f045b54::t_bf581092543198 61-67
+gen_icons.py
+  s_37df473f045b54::t_69bf6277095e9d 1-62
+frontend/panel.html
+  s_37df473f045b54::t_49cc118b9b0081 16
+tests/test_native_contract_windows.py
+  s_37df473f045b54::t_d941119bbf2a59 89,91-92
+  s_37df473f045b54::t_625932bae347da 1-88,90,93-95,97-102,105-107,110-291,294-514
+  s_37df473f045b54::t_e541312e0972ca 96
+  s_37df473f045b54::t_b4a16ac39c8406 103,108
+  s_37df473f045b54::t_a4cf1c44510488 104,109
+  s_37df473f045b54::t_9ad9d845b9f6dc 292-293
+.github/workflows/windows.yml
+  s_37df473f045b54::t_69bf6277095e9d 1-78
+src-tauri/tauri.windows.conf.json
+  s_37df473f045b54::t_69bf6277095e9d 1-17
+.gitignore
+  s_37df473f045b54::t_68132990c1a509 8-12
+src-tauri/src/hotkey.rs
+  s_37df473f045b54::t_af743886da7831 408-757
+  s_37df473f045b54::t_aabb5847749487 3,11,18,24
+src-tauri/src/virtual_desktop.rs
+  s_37df473f045b54::t_69bf6277095e9d 1-139
+frontend/pet.js
+  s_37df473f045b54::t_fe3c976c181fc8 12-17
+src-tauri/src/store.rs
+  s_37df473f045b54::t_f45009ad8c997f 40-46
+README.md
+  s_37df473f045b54::t_040ad0d9727e0f 9
+  s_37df473f045b54::t_6ed059e52b591e 143-181
+  s_37df473f045b54::t_a5e9511c44233e 25,27
+frontend/pet.html
+  s_37df473f045b54::t_6a1d99f6468194 43
+make_app.ps1
+  s_37df473f045b54::t_69bf6277095e9d 1-96
+src-tauri/Cargo.toml
+  s_37df473f045b54::t_3455a3dcd18435 25-33
+tests/test_packaging_windows.py
+  s_37df473f045b54::t_69bf6277095e9d 1-95
+系统分析-Windows版.md
+  s_37df473f045b54::t_69bf6277095e9d 1-312
+frontend/panel.js
+  s_37df473f045b54::t_a7f9322c914a3d 17-21
+src-tauri/src/windows_window.rs
+  s_37df473f045b54::t_69bf6277095e9d 1-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3a353a89cb9c95db3979054f292ec48ece04dff2",
+  "prompts": {},
+  "sessions": {
+    "s_37df473f045b54": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "session-e1858e4b-7e37-47f3-aabd-0b23f7f3bd52",
+        "model": "codefuse_official_channel/GLM-5.3"
+      },
+      "human_author": "muqing <muqing@antgroup.com>"
+    }
+  }
+}
