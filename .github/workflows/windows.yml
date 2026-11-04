@@ -95,11 +95,12 @@ jobs:
             Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1
           if (-not $exe) { throw "没有找到 NSIS 产物，无法发布 Release 资产" }
           Write-Host "==> 产物：$($exe.Name)"
-          if (gh release view $tag *> $null) {
-            Write-Host "==> Release $tag 已存在，覆盖上传同名资产"
-            gh release upload $tag $exe.FullName --clobber
-          } else {
-            Write-Host "==> 创建 Release $tag 并附上安装包"
+          # Release 已存在则覆盖上传；不存在时 upload 会失败，降级为创建。
+          # 不做 view 预检：其结果不可靠（曾出现 30s 超时返回非零导致误走创建分支）。
+          gh release upload $tag $exe.FullName --clobber
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "==> upload 未命中（exit=$LASTEXITCODE），尝试创建 Release $tag"
             gh release create $tag $exe.FullName --verify-tag --latest
           }
+          if ($LASTEXITCODE -ne 0) { throw "Release 资产发布失败（exit=$LASTEXITCODE）" }
           Write-Host "==> Release 资产上传完成"
