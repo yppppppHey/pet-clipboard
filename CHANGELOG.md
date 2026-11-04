@@ -1,6 +1,6 @@
 # 更新日志
 
-版本号与 `src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 保持一致；每个 Release 附带对应版本的 Windows NSIS 安装包（`Desktop Pet Clipboard_<版本>_x64-setup.exe`）。
+版本号与 `src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 保持一致；每个 Release 附带对应版本的 Windows NSIS 安装包（GitHub 上的资产名为 `Desktop.Pet.Clipboard_<版本>_x64-setup.exe`，本地构建产物为 `Desktop Pet Clipboard_<版本>_x64-setup.exe`，空格被替换成点号，内容相同）。
 
 ## [0.1.1] - 2026-11-04
 

@@ -10,7 +10,8 @@ Tauri 2 桌面宠物，兼任你的第二剪贴板。
 
 ## 下载安装（Windows）
 
-到 [Releases](https://github.com/yppppppHey/pet-clipboard/releases/latest) 下载 `Desktop Pet Clipboard_0.1.1_x64-setup.exe`，双击安装（按当前用户安装，不需要管理员权限）。
+到 [Releases](https://github.com/yppppppHey/pet-clipboard/releases/latest) 下载 `Desktop.Pet.Clipboard_0.1.1_x64-setup.exe`，双击安装（按当前用户安装，不需要管理员权限）。
+本地打包产出的文件名是 `Desktop Pet Clipboard_0.1.1_x64-setup.exe`，上传到 GitHub Release 时空格会被替换成点号，二者是同一个文件。
 
 安装包没有代码签名，SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
 macOS 暂不提供安装包，从源码构建即可（见下）。
