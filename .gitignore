@@ -10,3 +10,5 @@ __pycache__/
 Thumbs.db
 /dist/
 /cargo-check*.log
+/Desktop.Pet.Clipboard_*_x64-setup.exe
+/.workbuddy/
