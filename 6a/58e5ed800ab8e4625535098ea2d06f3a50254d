@@ -1,0 +1,19 @@
+README.md
+  s_37df473f045b54::t_10c01af8953ebd 210,212,214-217,221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a58e5ed800ab8e4625535098ea2d06f3a50254d",
+  "prompts": {},
+  "sessions": {
+    "s_37df473f045b54": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "session-e1858e4b-7e37-47f3-aabd-0b23f7f3bd52",
+        "model": "codefuse_official_channel/GLM-5.3"
+      },
+      "human_author": "muqing <muqing@antgroup.com>"
+    }
+  }
+}
