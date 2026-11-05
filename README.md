@@ -207,58 +207,15 @@ tests/             # 零额外依赖的前端逻辑、原生契约与打包回�
 
 素材处理：原图 `assets/material.png`，经 AI 图像工具（Nano Banana Pro）高清重绘得到候选 `aigc_1.png`（采用）/ `aigc_2.png`（备选），再用 Pillow 去除白色背景生成透明素材 `pet.png`。原图与全部候选图均为项目自带文件，无外部服务依赖。
 
-## Windows 版
+## 双平台架构
 
-同一份代码通过 `#[cfg]` 双平台编译：前端、存储与业务逻辑共享，平台差异隔离在以下模块。
+同一份代码通过 `#[cfg]` 编译出两个平台：前端、存储、共享时序状态机与业务主体只有一份，平台差异隔离在 `macos_window.rs`、`hotkey.rs` 平台事件源、`windows_window.rs`、`virtual_desktop.rs` 四个模块内（见上方目录结构）。
 
-### 架构（单仓库双平台）
-
-| 共享 | macOS 插件 | Windows 插件 |
-| --- | --- | --- |
-| `frontend/`、`store.rs`、共享时序状态机（`hotkey.rs` 上半部）、`main.rs` 业务主体 | `macos_window.rs`（AppKit CGEventTap 旁听 + Space） | `windows_window.rs`（Win32 无激活显示/HWND）、`hotkey.rs` 内 `platform`（WH_KEYBOARD_LL / WH_MOUSE_LL 只旁听）、`virtual_desktop.rs`（非官方 COM 跨桌面固定，失败自动降级） |
-
-- 存储：Windows 落在 `%LOCALAPPDATA%\desktop-pet-clipboard\store.json`（`#[cfg]` 分支，macOS 路径不变）。
-- 权限：Windows 无「辅助功能」授权，以钩子健康状态代替；监听中断时气泡展示恢复文案（运行时按 UA 选择，Mac 静态文案原样保留）。
-- 打包：主 `tauri.conf.json` 保持 macOS `app` 目标不变；NSIS 配置隔离在 `tauri.windows.conf.json` 平台覆盖层。
-
-### Windows 构建与测试
-
-```powershell
-# 自动化测试（前端/契约层与平台无关，Rust 单测需 Windows）
-cargo test --manifest-path src-tauri/Cargo.toml
-node --test tests/frontend.test.cjs
-python -m unittest discover -s tests -p 'test_*_windows.py' -v
-
-# 一键打包：全量测试 -> cargo tauri build -> NSIS 安装包复制到 dist\（失败保留旧产物）
-powershell -ExecutionPolicy Bypass -File make_app.ps1
-```
-
-图标由 `gen_icons.py` 从 `frontend/assets/pet.png` 生成（需要 `pip install pillow`）。
-
-连续集成：`.github/workflows/windows.yml` 在真实 `windows-latest` 容器跑全部测试并产出 NSIS 安装包（artifact `windows-nsis-installer`）。
-
-### Windows 已知限制
-
-| 限制 | 说明 | 应对 |
-| --- | --- | --- |
-| 独占全屏 | DirectX 独占全屏由系统合成器接管，任何置顶窗口都无法覆盖 | 属系统限制；无边框全屏 / F11 / 最大化都已支持 |
-| UIPI 隔离 | 普通权限无法旁听"以管理员运行"程序中的 C/V | 默认不提权，不影响其正常使用 |
-| 虚拟桌面 | 使用非官方 ImmersiveShell COM，系统更新后可能失效 | 失败自动降级为单桌面，不阻断启动 |
-| LL 钩子超时 | 回调过慢会被系统摘除 | 回调只做无锁入队；消息泵退出后 2s 自动重装 |
-| 未签名安装包 | SmartScreen 可能提示"未知发布者" | 可选"仍要运行"；后续可补代码签名 |
+- 主 `tauri.conf.json` 保持 macOS `app` 打包目标不变；Windows 的 NSIS 配置隔离在 `tauri.windows.conf.json` 平台覆盖层。
+- Windows 无「辅助功能」授权：以钩子健康状态代替，监听中断时气泡展示恢复文案（运行时按 UA 选择，Mac 静态文案原样保留）。
+- 素材图标由 `gen_icons.py` 从 `frontend/assets/pet.png` 生成（需要 `pip install pillow`）。
+- 连续集成：`.github/workflows/windows.yml` 在真实 `windows-latest` 容器跑全部测试并产出 NSIS 安装包（artifact `windows-nsis-installer`，打 tag 时自动附到 Release）。
 
 ## 更新日志
 
-### v0.1.1
-
-- **修复**：全屏应用里按 Ctrl+V 后桌宠被盖住。唤起改为「一律临时置顶」，不再依赖全屏检测；`ShowWindow` 前后各压一次 `HWND_TOPMOST`，前台全屏期间每 750ms 重申，防止全屏应用把自己抢回最前。
-- **修复**：桌宠因前台铺满屏幕被自动收起后，离开满屏不会恢复。现在区分「被挡住自动收起」与「用户点击收起」，只有前者自动恢复。
-- **修复**：取消置顶后，粘贴唤起会把窗口重新压成置顶。临时置顶与固定置顶改为互斥状态。
-- **变更**：剪贴板面板背景改为不透明的 `#fffafc`，去掉 `rgba(255,250,252,.88)` 与 `backdrop-filter` 毛玻璃。
-- **变更**：Windows 面板在「前台本身是置顶窗口」时也会置顶，并撤掉桌宠的临时置顶，避免面板被盖住。
-- **变更**：托盘菜单构建标识改为 `v0.1.1 · 全屏置顶修复 · 1028-1`，用于确认运行的是新进程。
-- **测试**：新增 5 条 Windows 契约测试（唤起临时置顶、取消固定、置顶型前台、观察线程重申、自动恢复语义）。
-
-### v0.1.0
-
-- 首个双平台版本：macOS 保持原有能力；新增 Windows 平台（低级钩子旁听、无激活显示、跨虚拟桌面固定、NSIS 安装包与 Windows CI）。
+见 [CHANGELOG.md](CHANGELOG.md)。
