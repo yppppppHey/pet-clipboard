@@ -1,0 +1,110 @@
+# macOS CI：全量自动化测试 + .app/dmg 打包 + Release 上传
+#
+# 触发与 windows.yml 完全一致（push main / tag v* / PR / 手动）。
+# tag 构建产出 aarch64 dmg 并附到同名 GitHub Release；
+# Release 的「创建」由 windows.yml 负责，本流水线只做带重试的上传——
+# Windows 冷缓存可达 ~40 分钟，重试窗口放宽到 ~60 分钟等待其先建 Release。
+#
+# 公共仓库 Actions 免费，双流水线并行跑不影响吞吐。
+
+name: macOS CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# tag 构建需要写权限把 dmg 上传到 Release
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macos 测试 + DMG 打包
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust（stable）
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ---- 阶段 1：低成本测试先跑 ----
+      - name: 前端逻辑测试（搜索竞态/去抖/重复提交等）
+        run: node --test tests/frontend.test.cjs
+
+      - name: macOS 原生契约 + 打包脚本回归
+        run: python -m unittest tests.test_native_contract tests.test_packaging -v
+
+      # ---- 阶段 2：Rust ----
+      - name: Rust 单元测试（store/快捷键状态机/窗口几何纯函数）
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      # ---- 阶段 3：.app 构建 + 签名校验（仓库标准打包路径）----
+      - name: make_app.sh（构建/签名/验证）
+        run: ./make_app.sh
+
+      # ---- 阶段 4：dmg 打包（拖入 Applications 的安装布局）----
+      - name: 打 DMG
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          DMG="Desktop-Pet-Clipboard_${VERSION}_aarch64.dmg"
+          STAGE="$(mktemp -d)"
+          cp -R "Desktop Pet Clipboard.app" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Desktop Pet Clipboard" -srcfolder "$STAGE" -format UDZO -ov "$DMG"
+          hdiutil verify "$DMG"
+          echo "DMG_PATH=$DMG" >> "$GITHUB_ENV"
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-installer
+          path: Desktop-Pet-Clipboard_*_aarch64.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      # ---- 阶段 5（仅 tag 构建）：附上 dmg 到 GitHub Release ----
+      # Release 由 windows.yml 创建；此重试兜底等待其就绪（含 Windows 冷缓存 ~40min）。
+      - name: 附上 dmg 到 GitHub Release（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          for attempt in $(seq 1 80); do
+            if gh release upload "$tag" "$DMG_PATH" --clobber; then
+              echo "==> 已附上 $DMG_PATH 到 Release $tag"
+              exit 0
+            fi
+            echo "==> Release $tag 尚未就绪（第 ${attempt}/80 次），45s 后重试"
+            sleep 45
+          done
+          echo "==> 等待超时：Release $tag 仍未由 Windows 流水线创建" >&2
+          exit 1
