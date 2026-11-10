@@ -1,0 +1,25 @@
+reset_accessibility.sh
+  s_37df473f045b54::t_49c36b1e760f6a 1-26
+make_dev_cert.sh
+  s_37df473f045b54::t_878c2d8229d5ea 1-71
+README.md
+  s_37df473f045b54::t_d329ae6da79195 76-88
+make_app.sh
+  s_37df473f045b54::t_b26482326c6885 61-66,71-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "18162fda3ec4f904289b8df13ca98fd56d0b5ef9",
+  "prompts": {},
+  "sessions": {
+    "s_37df473f045b54": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "session-e1858e4b-7e37-47f3-aabd-0b23f7f3bd52",
+        "model": "codefuse_official_channel/GLM-5.3"
+      },
+      "human_author": "muqing <muqing@antgroup.com>"
+    }
+  }
+}
