@@ -1,0 +1,19 @@
+make_dev_cert.sh
+  s_37df473f045b54::t_717fb3d93a54dc 54-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b5fa9cf749c8d9bd58082d0d377fbfcbf1cd190b",
+  "prompts": {},
+  "sessions": {
+    "s_37df473f045b54": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "session-e1858e4b-7e37-47f3-aabd-0b23f7f3bd52",
+        "model": "codefuse_official_channel/GLM-5.3"
+      },
+      "human_author": "muqing <muqing@antgroup.com>"
+    }
+  }
+}
