@@ -598,7 +598,7 @@ fn main() {
             let build_info = tauri::menu::MenuItem::with_id(
                 app,
                 "build-info",
-                "v0.1.1 · 全屏置顶修复 · 1028-1",
+                "v0.2.0 · 永久存编辑+CmdX面板 · 1111-1",
                 false,
                 None::<&str>,
             )?;

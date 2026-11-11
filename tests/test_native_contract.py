@@ -255,7 +255,7 @@ class NativeContractTests(unittest.TestCase):
     def test_build_identity_is_visible_in_tray_menu(self):
         main = (ROOT / "src-tauri/src/main.rs").read_text()
         self.assertIn('"build-info"', main)
-        self.assertIn("1028-1", main)
+        self.assertIn("1111-1", main)
 
     def test_launching_inside_an_existing_fullscreen_hides_without_waiting_for_space_change(self):
         native = (ROOT / "src-tauri/src/macos_window.rs").read_text()

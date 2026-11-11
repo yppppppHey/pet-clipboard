@@ -97,7 +97,7 @@ class MergeSafetyContract(unittest.TestCase):
         self.assertIn("set_activation_policy(tauri::ActivationPolicy::Accessory)", self.main)
         self.assertIn("activate_ignoring_other_apps(false)", self.main)
         self.assertIn("macos_window::observe_space_changes()?", self.main)
-        self.assertIn("1028-1", self.main, "托盘版本标识（Mac 契约锚点）保留")
+        self.assertIn("1111-1", self.main, "托盘版本标识（Mac 契约锚点）保留")
 
     def test_mac_shared_hotkey_layer_is_reused_not_duplicated(self):
         # 共享层 cfg 放宽到 windows，而非复制出第二份状态机；
