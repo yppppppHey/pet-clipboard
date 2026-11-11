@@ -6,15 +6,23 @@ Tauri 2 桌面宠物，兼任你的第二剪贴板。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform: macOS 13+ / Windows 10+](https://img.shields.io/badge/Platform-macOS%2013%2B%20%C2%B7%20Windows%2010%2B-lightgrey.svg)](#已知限制)
-[![Tests](https://img.shields.io/badge/Tests-Rust%2032%20%C2%B7%20Node%2022%20%C2%B7%20%E5%A5%91%E7%BA%A6%2073-brightgreen.svg)](#自动化测试)
+[![Tests](https://img.shields.io/badge/Tests-Rust%2041%20%C2%B7%20Node%2032%20%C2%B7%20%E5%A5%91%E7%BA%A6%2083-brightgreen.svg)](#自动化测试)
 
-## 下载安装（Windows）
+## 下载安装
 
-到 [Releases](https://github.com/yppppppHey/pet-clipboard/releases/latest) 下载 `Desktop.Pet.Clipboard_0.1.1_x64-setup.exe`，双击安装（按当前用户安装，不需要管理员权限）。
-本地打包产出的文件名是 `Desktop Pet Clipboard_0.1.1_x64-setup.exe`，上传到 GitHub Release 时空格会被替换成点号，二者是同一个文件。
+### macOS（Apple Silicon，macOS 13+）
 
-安装包没有代码签名，SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
-macOS 暂不提供安装包，从源码构建即可（见下）。
+到 [Releases](https://github.com/yppppppHey/pet-clipboard/releases/latest) 下载 `Desktop-Pet-Clipboard_0.2.0_aarch64.dmg`，双击打开，把 Desktop Pet Clipboard 拖入「应用程序」文件夹。
+
+应用为 ad-hoc 签名，首次打开如被 Gatekeeper 拦截：右键 → 打开。**每次升级都要在 系统设置 → 隐私与安全性 重新勾选「辅助功能」与「输入监控」**（每个版本都是新签名指纹，两处缺一不可，否则 Cmd+C/V/X 全部无响应）。
+
+### Windows（10 1809+ / 11）
+
+下载 `Desktop.Pet.Clipboard_0.2.0_x64-setup.exe`，双击安装（按当前用户安装，不需要管理员权限）。
+
+安装包没有代码签名，SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。无需任何授权，开箱即用。
+
+本地打包产出的文件名是 `Desktop Pet Clipboard_0.2.0_x64-setup.exe`，上传到 GitHub Release 时空格会被替换成点号，二者是同一个文件。
 
 ## 快速开始
 
@@ -140,7 +148,7 @@ node --test tests/frontend.test.cjs
 python -m unittest discover -s tests -p "test_*_windows.py" -v
 ```
 
-当前规模：Rust 单元测试 **32** 项、前端逻辑 **22** 项、平台契约 **73** 项，全部为纯本地静态/逻辑测试。
+当前规模：Rust 单元测试 **41** 项、前端逻辑 **32** 项、平台契约 **83** 项，全部为纯本地静态/逻辑测试。
 
 测试覆盖持久化与失败回滚、Unicode、去重与容量、快捷键识别、连续粘贴时序、跨应用全屏标记、手动面板入口、关闭保留输入、桌宠置顶切换、搜索竞态、错误提示、重复提交、权限事件和打包失败恢复。测试使用临时目录与模拟接口，不读写真实剪贴板数据。
 `test_native_contract.py` 仅防止原生调用路径和配置回归，不启动 WindowServer，也不证明全屏和焦点行为已通过实测。
