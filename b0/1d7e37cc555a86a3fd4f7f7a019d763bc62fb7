@@ -1,0 +1,50 @@
+tests/frontend.test.cjs
+  s_37df473f045b54::t_94dfa52b46f06a 389-427,431-539
+  s_37df473f045b54::t_cb544f5636a6a9 428-430
+  s_37df473f045b54::t_a698e0f9414076 540-541
+frontend/panel.html
+  s_37df473f045b54::t_0a9147c8875c96 80,82-104
+src-tauri/src/main.rs
+  s_37df473f045b54::t_8191db32b9ff06 552
+  s_37df473f045b54::t_09f7fe00cd6b8b 171-182
+  s_37df473f045b54::t_8b00a35e6865a1 435-447
+tests/test_native_contract.py
+  s_37df473f045b54::t_5f31e267f24fe4 132,138,146-152
+frontend/panel.js
+  s_37df473f045b54::t_bc4c6b59e9dea5 15-17
+  s_37df473f045b54::t_cf8acaa6fb4beb 86-93,98-155
+  s_37df473f045b54::t_0587e3006ec02f 156,295-321,332
+  s_37df473f045b54::t_e89e0da9f4b5a0 157
+tests/test_native_contract_windows.py
+  s_37df473f045b54::t_5f31e267f24fe4 264
+  s_37df473f045b54::t_5471fd93bbafff 251,253,255
+README.md
+  s_37df473f045b54::t_5f31e267f24fe4 165,167
+  s_37df473f045b54::t_db4e5e6191dfe4 50,53,57,122
+src-tauri/src/store.rs
+  s_37df473f045b54::t_8d88001c3df2d2 176,180,183,186,189,200,211,338-408
+  s_37df473f045b54::t_3a4cdff88d80d3 173-175
+  s_37df473f045b54::t_2f4a2e7bb08e0d 177-179
+  s_37df473f045b54::t_d35fdc4dbd534a 181-182
+  s_37df473f045b54::t_97349428ba7ca4 184-185
+  s_37df473f045b54::t_d76a0e0b1da080 187-188
+  s_37df473f045b54::t_aa53d5d65800a8 190-192,197-199
+  s_37df473f045b54::t_2cb3e860318696 201-203,208-210
+  s_37df473f045b54::t_e5aa5834910efc 212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b01d7e37cc555a86a3fd4f7f7a019d763bc62fb7",
+  "prompts": {},
+  "sessions": {
+    "s_37df473f045b54": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "session-e1858e4b-7e37-47f3-aabd-0b23f7f3bd52",
+        "model": "codefuse_official_channel/GLM-5.3"
+      },
+      "human_author": "muqing <muqing@antgroup.com>"
+    }
+  }
+}
