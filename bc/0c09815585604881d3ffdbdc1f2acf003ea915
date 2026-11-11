@@ -1,0 +1,36 @@
+README.md
+  s_37df473f045b54::t_87077df5b93e6f 84
+  s_37df473f045b54::t_2b4cc9f2d928ae 188
+src-tauri/src/main.rs
+  s_37df473f045b54::t_cb1d172ffb8100 601
+CHANGELOG.md
+  s_37df473f045b54::t_9d4b393205cd03 5-27
+src-tauri/tauri.conf.json
+  s_37df473f045b54::t_87f8643ddb5c23 4
+tests/test_native_contract.py
+  s_37df473f045b54::t_b44d16b81cfdd6 258
+make_app.sh
+  s_37df473f045b54::t_e456f67bf0f03d 51-52
+src-tauri/Cargo.toml
+  s_37df473f045b54::t_58c0c2304ef2c3 3
+tests/test_native_contract_windows.py
+  s_37df473f045b54::t_4fc4f64e1afc30 100
+src-tauri/Cargo.lock
+  s_37df473f045b54::t_942fbdeb9f4443 606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc0c09815585604881d3ffdbdc1f2acf003ea915",
+  "prompts": {},
+  "sessions": {
+    "s_37df473f045b54": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "session-e1858e4b-7e37-47f3-aabd-0b23f7f3bd52",
+        "model": "codefuse_official_channel/GLM-5.3"
+      },
+      "human_author": "muqing <muqing@antgroup.com>"
+    }
+  }
+}
