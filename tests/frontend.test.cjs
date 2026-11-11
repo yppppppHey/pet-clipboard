@@ -77,6 +77,7 @@ function fixture(overrides = {}, script = 'panel.js') {
   const defaults = {
     search_permanent: () => [], list_recent: () => [],
     permission_status: () => true, is_pet_pinned: () => false,
+    update_permanent: () => {},
   };
   const window = new Element();
   window.__TAURI__ = {
@@ -385,7 +386,159 @@ test('permission notifications and page teardown clean up correctly', async () =
   app.events.get('no-permission')();
   assert.equal(app.get('permissionBtn').hidden, false);
   await app.window.fire('pagehide');
-  assert.equal(app.stopped, 4);
+  assert.equal(app.stopped, 6);
+});
+
+test('permanent rows expose a hover edit button next to delete', async () => {
+  const app = fixture({ search_permanent: () => [{ key: 'key', value: 'value' }] });
+  await flush();
+  const row = app.get('list').children[0];
+  assert.equal(row.children[1].className, 'del');
+  assert.equal(row.children[2].className, 'edit');
+  const recent = fixture({ list_recent: () => ['text'] });
+  await flush();
+  await recent.tabs[1].fire('click');
+  await flush();
+  assert.equal(recent.get('list').children[0].children.length, 1); // 最近复制条目无删改按钮
+});
+
+test('entering edit replaces the row with inputs preloaded from the entry', async () => {
+  const app = fixture({ search_permanent: () => [{ key: 'name', value: 'content' }] });
+  await flush();
+  const row = app.get('list').children[0];
+  await row.children[2].fire('click');
+  assert.equal(row.classList.contains('editing'), true);
+  assert.equal(row.children.length, 4);
+  assert.equal(row.children[0].value, 'name');
+  assert.equal(row.children[1].value, 'content');
+  assert.equal(row.children[2].className, 'save-btn');
+  assert.equal(row.children[3].className, 'cancel-btn');
+});
+
+test('saving an edit renames via update_permanent and refreshes the list', async () => {
+  const app = fixture({ search_permanent: () => [{ key: 'name', value: 'content' }] });
+  await flush();
+  const row = app.get('list').children[0];
+  await row.children[2].fire('click');
+  row.children[0].value = 'renamed';
+  row.children[1].value = 'edited';
+  await row.children[2].fire('click');
+  await flush();
+  const call = app.calls.find(call => call.command === 'update_permanent');
+  assert.equal(call.args.oldKey, 'name');
+  assert.equal(call.args.newKey, 'renamed');
+  assert.equal(call.args.value, 'edited');
+  assert.match(app.get('toast').textContent, /已保存/);
+  assert.equal(app.get('list').children[0].children.length, 3); // 已重建为普通行
+});
+
+test('failed edit saves keep the row inputs and allow retry', async () => {
+  let attempts = 0;
+  const app = fixture({
+    search_permanent: () => [{ key: 'name', value: 'content' }],
+    update_permanent: () => attempts++ === 0 ? Promise.reject('disk full') : undefined,
+  });
+  await flush();
+  const row = app.get('list').children[0];
+  await row.children[2].fire('click');
+  row.children[0].value = 'renamed';
+  await row.children[2].fire('click');
+  await flush();
+  assert.match(app.get('toast').textContent, /操作失败.*disk full/);
+  assert.equal(row.children[2].disabled, false);
+  assert.equal(row.children[0].value, 'renamed'); // 输入保留
+  assert.equal(app.get('list').children[0], row); // 未重建
+  await row.children[2].fire('click');
+  assert.equal(app.count('update_permanent'), 2);
+  await flush();
+  assert.match(app.get('toast').textContent, /已保存/);
+});
+
+test('an empty new key never invokes and cancel restores the row', async () => {
+  const app = fixture({ search_permanent: () => [{ key: 'name', value: 'content' }] });
+  await flush();
+  const row = app.get('list').children[0];
+  await row.children[2].fire('click');
+  row.children[0].value = '  ';
+  await row.children[2].fire('click');
+  assert.equal(app.count('update_permanent'), 0);
+  assert.match(app.get('toast').textContent, /key 不能为空/);
+  await row.children[3].fire('click'); // 取消
+  await flush();
+  assert.equal(app.count('update_permanent'), 0);
+  const fresh = app.get('list').children[0];
+  assert.notEqual(fresh, row);
+  assert.equal(fresh.children.length, 3);
+});
+
+test('enter saves and escape cancels from either edit input', async () => {
+  const app = fixture({ search_permanent: () => [{ key: 'name', value: 'content' }] });
+  await flush();
+  const row = app.get('list').children[0];
+  await row.children[2].fire('click');
+  row.children[1].value = 'via-enter';
+  await row.children[1].fire('keydown', { key: 'Enter' });
+  await flush();
+  const call = app.calls.find(call => call.command === 'update_permanent');
+  assert.equal(call.args.oldKey, 'name');
+  assert.equal(call.args.newKey, 'name');
+  assert.equal(call.args.value, 'via-enter');
+  await app.get('list').children[0].children[2].fire('click');
+  await app.get('list').children[0].children[1].fire('keydown', { key: 'Escape' });
+  await flush();
+  assert.equal(app.count('update_permanent'), 1); // escape 只退出不保存
+  assert.equal(app.get('list').children[0].children.length, 3);
+});
+
+test('a shortcut-shown panel hides itself after eight idle seconds', async () => {
+  const app = fixture();
+  await flush();
+  assert.equal(app.count('close_panel'), 0);
+  app.events.get('panel-shown-by-shortcut')();
+  app.events.get('panel-shown-by-shortcut')(); // 重按只重置不叠加
+  app.runTimers(8000);
+  await flush();
+  assert.equal(app.count('close_panel'), 1);
+});
+
+test('panel interactions renew the timer but never arm it themselves', async () => {
+  const app = fixture();
+  await flush();
+  await app.window.fire('pointerdown');
+  await app.window.fire('input');
+  app.runTimers(8000);
+  assert.equal(app.count('close_panel'), 0); // 📋 打开：永不自动隐藏
+  app.events.get('panel-shown-by-shortcut')();
+  await app.window.fire('pointerdown');
+  await app.window.fire('keydown');
+  app.runTimers(8000);
+  await flush();
+  assert.equal(app.count('close_panel'), 1); // 交互续期后到期隐藏
+});
+
+test('an active edit defers idle hiding until editing finishes', async () => {
+  const app = fixture({ search_permanent: () => [{ key: 'name', value: 'content' }] });
+  await flush();
+  app.events.get('panel-shown-by-shortcut')();
+  const row = app.get('list').children[0];
+  await row.children[2].fire('click'); // 进入编辑
+  app.runTimers(8000); // 编辑中到期：只续期不关闭
+  assert.equal(app.count('close_panel'), 0);
+  await row.children[1].fire('keydown', { key: 'Enter' }); // 保存完成
+  await flush();
+  app.runTimers(8000); // 编辑结束：正常到期
+  await flush();
+  assert.equal(app.count('close_panel'), 1);
+});
+
+test('panel-hidden disarms the timer so stale timers cannot hide a reopened panel', async () => {
+  const app = fixture();
+  await flush();
+  app.events.get('panel-shown-by-shortcut')();
+  await app.get('closeBtn').fire('click'); // 手动关闭 1 次
+  app.events.get('panel-hidden')(); // Rust 隐藏后发来的事件
+  app.runTimers(8000);
+  assert.equal(app.count('close_panel'), 1); // 没有第二次（计时器已解除）
 });
 
 test('failed loads and empty search results are distinct states', async () => {

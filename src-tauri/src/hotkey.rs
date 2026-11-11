@@ -56,6 +56,7 @@ impl PresentationState {
 enum Shortcut {
     Copy,
     Paste,
+    Cut,
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -69,6 +70,7 @@ fn shortcut(keycode: i64, flags: u64, autorepeat: bool) -> Option<Shortcut> {
     match keycode {
         8 => Some(Shortcut::Copy),
         9 => Some(Shortcut::Paste),
+        7 => Some(Shortcut::Cut),
         _ => None,
     }
 }
@@ -94,7 +96,8 @@ impl ShortcutState {
                 if keycode == 9 {
                     self.paste_pending = action == Some(Shortcut::Paste);
                 }
-                if action == Some(Shortcut::Copy) {
+                // Copy 与 Cut 均在 keyDown 触发；Paste 走 keyUp 的 pending 状态机。
+                if matches!(action, Some(Shortcut::Copy) | Some(Shortcut::Cut)) {
                     action
                 } else {
                     None
@@ -176,6 +179,7 @@ mod platform {
     struct Context {
         copy_tx: SyncSender<()>,
         paste_tx: SyncSender<PresentationEvent>,
+        panel_tx: SyncSender<()>,
         tap: AtomicPtr<c_void>,
     }
 
@@ -255,6 +259,11 @@ mod platform {
             Some(Shortcut::Paste) => {
                 let _ = context.paste_tx.try_send(PresentationEvent::Paste);
             }
+            Some(Shortcut::Cut) => {
+                // 剪切同样写入剪贴板：复用复制管线收录内容，同时唤出面板。
+                let _ = context.copy_tx.try_send(());
+                let _ = context.panel_tx.try_send(());
+            }
             None => {}
         }
         event
@@ -327,13 +336,22 @@ mod platform {
         }
     }
 
+    /// Cmd+X 唤面板 worker：容量 1 合并连按，唤醒即带出面板（重复按下仅重置计时）。
+    fn panel_worker(app: tauri::AppHandle, rx: Receiver<()>) {
+        while rx.recv().is_ok() {
+            crate::bring_panel_forward(&app);
+        }
+    }
+
     pub fn spawn_listener(app: tauri::AppHandle, state: AppStateSafe) {
         let (copy_tx, copy_rx) = mpsc::sync_channel(1);
         let (paste_tx, paste_rx) = mpsc::sync_channel(64);
+        let (panel_tx, panel_rx) = mpsc::sync_channel(1);
         if CONTEXT
             .set(Context {
                 copy_tx,
                 paste_tx,
+                panel_tx,
                 tap: AtomicPtr::new(std::ptr::null_mut()),
             })
             .is_err()
@@ -344,6 +362,8 @@ mod platform {
         std::thread::spawn(move || copy_worker(worker_app, state, copy_rx));
         let worker_app = app.clone();
         std::thread::spawn(move || paste_worker(worker_app, paste_rx));
+        let worker_app = app.clone();
+        std::thread::spawn(move || panel_worker(worker_app, panel_rx));
         std::thread::spawn(move || unsafe {
             let mut notified = false;
             loop {
@@ -434,9 +454,10 @@ mod platform {
     enum KbdAction {
         Copy,
         Paste,
+        Cut,
     }
 
-    /// VK 状态机：修饰键跟踪 + 长按抑制；复制首次 KEYDOWN、粘贴 KEYUP（对齐共享层时序语义）。
+    /// VK 状态机：修饰键跟踪 + 长按抑制；复制/剪切首次 KEYDOWN、粘贴 KEYUP（对齐共享层时序语义）。
     #[derive(Default)]
     struct Keys {
         ctrl: bool,
@@ -444,6 +465,7 @@ mod platform {
         alt: bool,
         c_down: bool,
         v_down: bool,
+        x_down: bool,
         paste_pending: bool,
     }
 
@@ -495,6 +517,19 @@ mod platform {
                         }
                     }
                 }
+                0x58 => {
+                    // VK_X（Ctrl+X）：首次按下触发，连按由 x_down 抑制；同 Copy 语义。
+                    if down {
+                        if !self.x_down {
+                            self.x_down = true;
+                            if self.ctrl && !self.shift && !self.alt {
+                                return Some(KbdAction::Cut);
+                            }
+                        }
+                    } else {
+                        self.x_down = false;
+                    }
+                }
                 _ => {}
             }
             None
@@ -509,6 +544,7 @@ mod platform {
     struct Context {
         copy_tx: SyncSender<()>,
         paste_tx: SyncSender<PresentationEvent>,
+        panel_tx: SyncSender<()>,
     }
 
     static CONTEXT: OnceLock<Context> = OnceLock::new();
@@ -532,6 +568,11 @@ mod platform {
                         }
                         Some(KbdAction::Paste) => {
                             let _ = context.paste_tx.try_send(PresentationEvent::Paste);
+                        }
+                        Some(KbdAction::Cut) => {
+                            // 剪切同样写入剪贴板：复用复制管线收录内容，同时唤出面板。
+                            let _ = context.copy_tx.try_send(());
+                            let _ = context.panel_tx.try_send(());
                         }
                         None => {}
                     }
@@ -657,16 +698,33 @@ mod platform {
         }
     }
 
+    /// Ctrl+X 唤面板 worker：容量 1 合并连按，唤醒即带出面板（重复按下仅重置计时）。
+    fn panel_worker(app: tauri::AppHandle, rx: Receiver<()>) {
+        while rx.recv().is_ok() {
+            crate::bring_panel_forward(&app);
+        }
+    }
+
     pub fn spawn_listener(app: tauri::AppHandle, state: AppStateSafe) {
         let (copy_tx, copy_rx) = mpsc::sync_channel(1);
         let (paste_tx, paste_rx) = mpsc::sync_channel(64);
-        if CONTEXT.set(Context { copy_tx, paste_tx }).is_err() {
+        let (panel_tx, panel_rx) = mpsc::sync_channel(1);
+        if CONTEXT
+            .set(Context {
+                copy_tx,
+                paste_tx,
+                panel_tx,
+            })
+            .is_err()
+        {
             return;
         }
         let worker_app = app.clone();
         std::thread::spawn(move || copy_worker(worker_app, state, copy_rx));
         let worker_app = app.clone();
         std::thread::spawn(move || paste_worker(worker_app, paste_rx));
+        let worker_app = app.clone();
+        std::thread::spawn(move || panel_worker(worker_app, panel_rx));
 
         std::thread::spawn(move || loop {
             let keyboard_hook: windows::core::Result<HHOOK> =
@@ -750,6 +808,27 @@ mod platform {
             keys.event(0x56, true);
             keys.event(0x11, false);
             assert_eq!(keys.event(0x56, false), Some(KbdAction::Paste));
+        }
+
+        #[test]
+        fn cut_fires_once_on_first_keydown() {
+            let mut keys = Keys::default();
+            keys.event(0xA2, true); // left ctrl
+            assert_eq!(keys.event(0x58, true), Some(KbdAction::Cut));
+            assert_eq!(keys.event(0x58, true), None); // autorepeat 抑制
+            assert_eq!(keys.event(0x58, false), None);
+        }
+
+        #[test]
+        fn modifiers_block_cut() {
+            let mut keys = Keys::default();
+            keys.event(0x11, true);
+            keys.event(0x10, true); // shift
+            assert_eq!(keys.event(0x58, true), None);
+            let mut other = Keys::default();
+            other.event(0x11, true);
+            other.event(0x12, true); // alt
+            assert_eq!(other.event(0x58, true), None);
         }
     }
 }
@@ -849,11 +928,29 @@ mod tests {
     }
 
     #[test]
+    fn cut_fires_on_key_down_only() {
+        let mut state = ShortcutState::default();
+        assert_eq!(state.handle(10, 7, 0x100000, false), Some(Shortcut::Cut));
+        assert_eq!(state.handle(10, 7, 0x100000, true), None); // autorepeat 抑制
+        assert_eq!(state.handle(11, 7, 0x100000, false), None); // keyUp 不触发
+    }
+
+    #[test]
+    fn cut_accepts_ctrl_or_cmd_but_not_modifiers() {
+        for flags in [0x40000, 0x100000, 0x140000] {
+            assert_eq!(shortcut(7, flags, false), Some(Shortcut::Cut));
+        }
+        assert_eq!(shortcut(7, 0x100000 | 0x20000, false), None);
+        assert_eq!(shortcut(7, 0x100000 | 0x80000, false), None);
+    }
+
+    #[test]
     fn ignores_plain_keys_repeats_and_extended_shortcuts() {
         assert_eq!(shortcut(8, 0, false), None);
         assert_eq!(shortcut(9, 0x1000, false), None);
         assert_eq!(shortcut(9, 0x100000, true), None);
-        assert_eq!(shortcut(7, 0x100000, false), None);
+        // 7 号键是 X（Cut 有专属用例）；用 6 号键代表确实不监听的键。
+        assert_eq!(shortcut(6, 0x100000, false), None);
         assert_eq!(shortcut(8, 0x100000 | 0x20000, false), None);
         assert_eq!(shortcut(9, 0x100000 | 0x80000, false), None);
     }

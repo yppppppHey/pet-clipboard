@@ -12,6 +12,9 @@ let renderVersion = 0;
 let searchTimer;
 let toastTimer;
 let adding = false;
+let editing = false;
+let idleTimer;
+const IDLE_TIMEOUT_MS = 8000;
 let disposed = false;
 
 // Windows 没有「辅助功能」授权：监听中断时展示恢复文案（Mac 保留授权引导原文）。
@@ -80,8 +83,76 @@ function createRow(value, key) {
       }
     });
     row.appendChild(remove);
+    const edit = document.createElement('button');
+    edit.className = 'edit';
+    edit.type = 'button';
+    edit.textContent = '✎';
+    edit.title = '编辑';
+    edit.setAttribute('aria-label', `编辑「${key}」`);
+    edit.addEventListener('click', () => enterEdit(row, key, value));
+    row.appendChild(edit);
   }
   return row;
+}
+
+function enterEdit(row, oldKey, value) {
+  editing = true;
+  row.classList.add('editing');
+  const keyInput = document.createElement('input');
+  keyInput.type = 'text';
+  keyInput.className = 'edit-input key-input';
+  keyInput.setAttribute('aria-label', '名称');
+  keyInput.value = oldKey;
+  const valueInput = document.createElement('input');
+  valueInput.type = 'text';
+  valueInput.className = 'edit-input value-input';
+  valueInput.setAttribute('aria-label', '内容');
+  valueInput.value = value;
+  const save = document.createElement('button');
+  save.className = 'save-btn';
+  save.type = 'button';
+  save.textContent = '保存';
+  const cancel = document.createElement('button');
+  cancel.className = 'cancel-btn';
+  cancel.type = 'button';
+  cancel.textContent = '取消';
+  const submit = () => { void saveEdit(row, oldKey, keyInput, valueInput, save); };
+  save.addEventListener('click', submit);
+  cancel.addEventListener('click', () => { void exitEdit(); });
+  const keydown = event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      void exitEdit();
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      submit();
+    }
+  };
+  keyInput.addEventListener('keydown', keydown);
+  valueInput.addEventListener('keydown', keydown);
+  row.replaceChildren(keyInput, valueInput, save, cancel);
+}
+
+async function saveEdit(row, oldKey, keyInput, valueInput, save) {
+  if (!editing || save.disabled) return;
+  const newKey = keyInput.value.trim();
+  if (!newKey) { toast('key 不能为空'); return; }
+  save.disabled = true;
+  try {
+    await invoke('update_permanent', { oldKey, newKey, value: valueInput.value });
+    editing = false;
+    toast('已保存');
+    await render();
+  } catch (error) {
+    // 失败保留行内输入，用户可修改后重试；不做任何重渲染。
+    save.disabled = false;
+    report(error);
+  }
+}
+
+async function exitEdit() {
+  editing = false;
+  await render();
 }
 
 async function render() {
@@ -221,6 +292,33 @@ async function subscribe(event, handler) {
   }
 }
 
+// Cmd+X 唤出的面板 8 秒无操作自动隐藏；📋 打开的面板不武装，保持现状。
+function armIdle() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    // 编辑进行中绝不打断：到期改为重新武装，待编辑结束后继续计时。
+    if (editing) {
+      armIdle();
+      return;
+    }
+    idleTimer = undefined;
+    invoke('close_panel').catch(report);
+  }, IDLE_TIMEOUT_MS);
+}
+
+function disarmIdle() {
+  clearTimeout(idleTimer);
+  idleTimer = undefined;
+}
+
+// 交互续期：仅当计时器已武装（Cmd+X 唤出）才顺延，绝不新武装。
+for (const type of ['pointerdown', 'keydown', 'input']) {
+  window.addEventListener(type, () => { if (idleTimer !== undefined) armIdle(); });
+}
+
+void subscribe('panel-shown-by-shortcut', () => armIdle());
+void subscribe('panel-hidden', () => disarmIdle());
+
 void subscribe('clipboard-added', () => { if (tab === 'recent') void render(); });
 void subscribe('clipboard-error', event => report(event.payload));
 void subscribe('no-permission', () => { $('permissionBtn').hidden = false; });
@@ -231,6 +329,7 @@ window.addEventListener('pagehide', () => {
   ++renderVersion;
   clearTimeout(searchTimer);
   clearTimeout(toastTimer);
+  clearTimeout(idleTimer);
   unlisten.splice(0).forEach(stop => stop());
 });
 

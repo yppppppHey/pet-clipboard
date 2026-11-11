@@ -163,6 +163,53 @@ impl StoreManager {
         self.commit(next)
     }
 
+    /// 更新永久条目（key 与内容都可改）；ts 刷新使条目置顶。
+    /// 旧 key 不存在报错；不增加条数，因此不受 PERMANENT_MAX 满员限制。
+    pub fn update_permanent(
+        &mut self,
+        old_key: &str,
+        new_key: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        if !self.store.permanent.iter().any(|i| i.key == old_key) {
+            return Err(format!("原 key「{old_key}」不存在"));
+        }
+        let new_key = new_key.trim();
+        if new_key.is_empty() {
+            return Err("key 不能为空".into());
+        }
+        if new_key.len() > 1024 {
+            return Err("key 不能超过 1 KB".into());
+        }
+        if value.len() > MAX_TEXT_BYTES {
+            return Err("内容不能超过 1 MB".into());
+        }
+        if new_key != old_key && self.store.permanent.iter().any(|i| i.key == new_key) {
+            return Err(format!("key「{new_key}」已存在，请换一个"));
+        }
+        // 改名必写盘；仅内容未变时幂等跳过（与 add_permanent 的短路语义一致）。
+        if new_key == old_key
+            && self
+                .store
+                .permanent
+                .iter()
+                .find(|i| i.key == old_key)
+                .is_some_and(|i| i.value == value)
+        {
+            return Ok(());
+        }
+        let mut next = self.store.clone();
+        let item = next
+            .permanent
+            .iter_mut()
+            .find(|i| i.key == old_key)
+            .ok_or_else(|| format!("原 key「{old_key}」不存在"))?;
+        item.key = new_key.to_string();
+        item.value = value.to_string();
+        item.ts = Self::now();
+        self.commit(next)
+    }
+
     pub fn remove_permanent(&mut self, key: &str) -> Result<(), String> {
         if !self.store.permanent.iter().any(|item| item.key == key) {
             return Ok(());
@@ -286,6 +333,77 @@ mod tests {
         store.remove_permanent("key1").unwrap();
         store.add_permanent("replacement", "value").unwrap();
         assert_eq!(fixture.manager().store.permanent.len(), PERMANENT_MAX);
+    }
+
+    #[test]
+    fn update_renames_promotes_and_old_key_gone() {
+        let fixture = Fixture::new();
+        let mut store = fixture.manager();
+        store.add_permanent("first", "one").unwrap();
+        store.add_permanent("second", "two").unwrap();
+        store.update_permanent("first", "renamed", "edited").unwrap();
+        let loaded = fixture.manager();
+        assert_eq!(loaded.search_permanent("")[0].key, "renamed");
+        assert_eq!(loaded.search_permanent("")[0].value, "edited");
+        assert!(loaded.search_permanent("first").is_empty());
+    }
+
+    #[test]
+    fn update_missing_old_key_is_an_error() {
+        let fixture = Fixture::new();
+        let mut store = fixture.manager();
+        assert!(store.update_permanent("ghost", "new", "value").is_err());
+    }
+
+    #[test]
+    fn update_conflicting_new_key_is_an_error_and_keeps_data() {
+        let fixture = Fixture::new();
+        let mut store = fixture.manager();
+        store.add_permanent("a", "va").unwrap();
+        store.add_permanent("b", "vb").unwrap();
+        assert!(store.update_permanent("a", "b", "va2").is_err());
+        let loaded = fixture.manager();
+        assert_eq!(loaded.search_permanent("").len(), 2);
+        assert_eq!(loaded.search_permanent("a")[0].value, "va");
+        assert_eq!(loaded.search_permanent("b")[0].value, "vb");
+    }
+
+    #[test]
+    fn update_same_key_keeps_identity_and_skips_unchanged_writes() {
+        let fixture = Fixture::new();
+        let mut store = fixture.manager();
+        store.add_permanent("key", "value").unwrap();
+        std::fs::remove_file(&store.path).unwrap();
+        store.update_permanent("key", "key", "value").unwrap();
+        assert!(!store.path.exists());
+        store.update_permanent("key", "key", "changed").unwrap();
+        assert_eq!(fixture.manager().search_permanent("key")[0].value, "changed");
+        assert_eq!(fixture.manager().store.permanent.len(), 1);
+    }
+
+    #[test]
+    fn update_validates_key_and_value_sizes() {
+        let fixture = Fixture::new();
+        let mut store = fixture.manager();
+        store.add_permanent("key", "value").unwrap();
+        assert!(store.update_permanent("key", " \n", "value").is_err());
+        assert!(store.update_permanent("key", &"k".repeat(1025), "value").is_err());
+        assert!(store
+            .update_permanent("key", "key", &"x".repeat(MAX_TEXT_BYTES + 1))
+            .is_err());
+    }
+
+    #[test]
+    fn update_bypasses_the_full_limit() {
+        let fixture = Fixture::new();
+        let mut store = fixture.manager();
+        for n in 0..PERMANENT_MAX {
+            store.add_permanent(&format!("key{n}"), "value").unwrap();
+        }
+        assert!(store.add_permanent("overflow", "value").is_err());
+        store.update_permanent("key0", "renamed0", "edited").unwrap();
+        assert_eq!(fixture.manager().store.permanent.len(), PERMANENT_MAX);
+        assert_eq!(fixture.manager().search_permanent("renamed0")[0].value, "edited");
     }
 
     #[test]

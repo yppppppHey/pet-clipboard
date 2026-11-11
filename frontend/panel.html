@@ -77,9 +77,31 @@
   .row .badge { font-size: 10px; color: #fff; background: var(--green); padding: 1px 7px; border-radius: 6px; }
   .row .del {
     opacity: 0; border: none; background: none; color: #d8a2ae;
-    font-size: 14px; cursor: pointer; padding: 0 2px;
+    font-size: 14px; cursor: pointer; padding: 0 2px; order: 2;
   }
-  .row:hover .del, .row:focus-within .del { opacity: 1; }
+  .row .edit {
+    opacity: 0; border: none; background: none; color: var(--accent-deep);
+    font-size: 12px; cursor: pointer; padding: 0 2px; order: 1;
+  }
+  .row:hover .del, .row:focus-within .del,
+  .row:hover .edit, .row:focus-within .edit { opacity: 1; }
+  /* 行内编辑态：取消 hover 抬升，输入框铺满行宽 */
+  .row.editing { cursor: default; }
+  .row.editing:hover { border-color: var(--line); transform: none; box-shadow: none; }
+  .row.editing .edit-input {
+    min-width: 0;
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px;
+    font-size: 12px; outline: none; color: var(--ink); background: var(--card);
+  }
+  .row.editing .edit-input:focus { border-color: var(--accent); }
+  .row.editing .key-input { width: 84px; flex: none; }
+  .row.editing .value-input { flex: 1; }
+  .row .save-btn, .row .cancel-btn {
+    border: none; border-radius: 9px; padding: 7px 14px; font-size: 12px;
+    cursor: pointer; white-space: nowrap; opacity: 1;
+  }
+  .row .save-btn { background: linear-gradient(135deg, #ffb3c0, #e87f95); color: #fff; }
+  .row .cancel-btn { background: none; color: var(--sub); padding: 7px 8px; }
   button:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; }
   button:disabled { cursor: wait; opacity: .65; }
   .empty { text-align: center; color: var(--sub); padding: 36px 0; font-size: 12px; }

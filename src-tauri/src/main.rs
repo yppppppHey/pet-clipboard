@@ -168,6 +168,18 @@ pub fn bring_pet_forward(app: &tauri::AppHandle) {
     });
 }
 
+/// Cut raises the panel alone: no pet presentation. The event marks this show
+/// as shortcut-driven so the frontend arms its idle auto-hide timer.
+pub fn bring_panel_forward(app: &tauri::AppHandle) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Err(error) = show_panel(&app2) {
+            eprintln!("[panel] shortcut presentation failed: {error}");
+        }
+        let _ = tauri::Emitter::emit_to(&app2, "panel", "panel-shown-by-shortcut", ());
+    });
+}
+
 #[cfg(target_os = "macos")]
 pub fn dismiss_pet_on_outside_click(
     app: &tauri::AppHandle,
@@ -420,6 +432,19 @@ async fn remove_permanent(state: tauri::State<'_, AppStateSafe>, key: String) ->
     .await
 }
 
+#[tauri::command]
+async fn update_permanent(
+    state: tauri::State<'_, AppStateSafe>,
+    old_key: String,
+    new_key: String,
+    value: String,
+) -> Result<(), String> {
+    with_store(state.inner().clone(), move |store| {
+        store.update_permanent(&old_key, &new_key, &value)
+    })
+    .await
+}
+
 #[derive(serde::Serialize)]
 struct PermanentRow {
     key: String,
@@ -506,6 +531,7 @@ async fn toggle_panel(app: tauri::AppHandle) -> Result<(), String> {
             win.hide().map_err(|e| e.to_string())?;
             #[cfg(target_os = "windows")]
             restore_temporary_topmost(app);
+            let _ = tauri::Emitter::emit_to(app, "panel", "panel-hidden", ());
             Ok(())
         } else {
             show_panel(app)
@@ -523,6 +549,7 @@ async fn close_panel(app: tauri::AppHandle) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         #[cfg(target_os = "windows")]
         restore_temporary_topmost(app);
+        let _ = tauri::Emitter::emit_to(app, "panel", "panel-hidden", ());
         Ok(())
     })
     .await
@@ -612,6 +639,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             add_permanent,
             remove_permanent,
+            update_permanent,
             search_permanent,
             list_recent,
             copy_to_clipboard,

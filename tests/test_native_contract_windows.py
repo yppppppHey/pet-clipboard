@@ -248,8 +248,11 @@ class HotkeyContract(unittest.TestCase):
     def test_copy_on_first_keydown_with_autorepeat_filter(self):
         self.assertIn("0x43", self.mod)  # VK_C
         self.assertIn("0x56", self.mod)  # VK_V
+        self.assertIn("0x58", self.mod)  # VK_X
         self.assertIn("if !self.c_down", self.mod)
+        self.assertIn("if !self.x_down", self.mod)
         self.assertIn("Some(KbdAction::Copy)", self.mod)
+        self.assertIn("Some(KbdAction::Cut)", self.mod)
 
     def test_paste_fires_on_keyup_only(self):
         self.assertRegex(
@@ -258,7 +261,7 @@ class HotkeyContract(unittest.TestCase):
         )
 
     def test_shift_and_alt_block_shortcuts(self):
-        self.assertEqual(self.mod.count("!self.shift && !self.alt"), 2)
+        self.assertEqual(self.mod.count("!self.shift && !self.alt"), 3)  # C/V/X 三键一致屏蔽
 
     def test_timing_constants_match_spec(self):
         self.assertRegex(self.mod, r"COPY_DELAY: Duration = Duration::from_millis\(250\)")

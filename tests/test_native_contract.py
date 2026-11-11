@@ -129,13 +129,13 @@ class NativeContractTests(unittest.TestCase):
         self.assertEqual(parser.close["data-tauri-drag-region"], "false")
         self.assertEqual(parser.drag_ancestors, [])
 
-    def test_panel_is_initially_hidden_and_has_no_tray_or_automatic_open_path(self):
+    def test_panel_is_initially_hidden_and_only_opens_by_tray_toggle_or_cut_shortcut(self):
         config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text())
         panel = next(window for window in config["app"]["windows"] if window["label"] == "panel")
         self.assertIs(panel["visible"], False)
         self.assertIs(panel["focus"], False)
         main = (ROOT / "src-tauri/src/main.rs").read_text()
-        self.assertEqual(len(re.findall(r"\bshow_panel\(", main)), 2)  # Definition plus the manual toggle.
+        self.assertEqual(len(re.findall(r"\bshow_panel\(", main)), 3)  # Definition + manual toggle + cut shortcut.
         self.assertIn("show_panel(app)", function_body(main, "toggle_panel"))
         self.assertNotIn("float_panel", main)
         self.assertNotIn('"open-panel"', main)
@@ -143,6 +143,13 @@ class NativeContractTests(unittest.TestCase):
         self.assertNotIn("show_panel", function_body(main, "bring_pet_forward"))
         self.assertNotIn("show_panel", function_body(main, "present_pet"))
         self.assertNotIn("show_panel", function_body(main, "show_pet"))
+        # Cmd/Ctrl+X 唤面板：与桌宠出场严格分离；的事件标记驱动前端空闲计时。
+        bring_panel = function_body(main, "bring_panel_forward")
+        self.assertIn("show_panel(&app2)", bring_panel)
+        self.assertIn('"panel-shown-by-shortcut"', bring_panel)
+        self.assertNotIn("present_pet", bring_panel)
+        self.assertIn('"panel-hidden"', function_body(main, "close_panel"))
+        self.assertIn('"panel-hidden"', function_body(main, "toggle_panel"))
 
     def test_close_panel_is_idempotent_hiding_not_destruction(self):
         main = (ROOT / "src-tauri/src/main.rs").read_text()
